@@ -1,0 +1,15 @@
+# Godot 4+
+.godot/
+export_presets.cfg
+*.translation
+
+# builds e exports
+build/
+export/
+screenshots/
+.preview/
+
+# sistema
+.DS_Store
+Thumbs.db
+*.log

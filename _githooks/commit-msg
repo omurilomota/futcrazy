@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Hook commit-msg: exige gitmoji + tipo convencional.
+# Formato: <emoji> <tipo>(escopo): descrição
+# Exemplo: ✨ feat(player): chute com recuo e cambaleio
+set -euo pipefail
+
+msg_file="$1"
+first_line="$(head -n 1 "$msg_file")"
+
+# commits automáticos passam direto
+case "$first_line" in
+  Merge*|Revert*|Initial\ commit*|fixup!*|squash!*) exit 0 ;;
+esac
+
+types='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
+
+if ! printf '%s' "$first_line" | grep -Eq "^[^ ]+ ($types)(\([a-z0-9._/-]+\))?: .{3,}"; then
+  echo "✖ Mensagem fora do padrão gitmoji." >&2
+  echo "" >&2
+  echo "  Formato: <emoji> <tipo>(escopo): descrição" >&2
+  echo "  Exemplo: ✨ feat(player): chute com recuo e cambaleio" >&2
+  echo "  Tipos:   $types" >&2
+  echo "" >&2
+  echo "  Emojis comuns: 🎉 ✨ 🐛 📝 💄 ♻️ ⚡ ✅ 🔧 🚧 🧪 🎨 🥅 🔥" >&2
+  exit 1
+fi
+
+if [ "${#first_line}" -gt 90 ]; then
+  echo "✖ Primeira linha com ${#first_line} caracteres (máx. 90)." >&2
+  exit 1
+fi
