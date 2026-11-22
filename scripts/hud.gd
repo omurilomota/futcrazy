@@ -10,15 +10,21 @@ var banner_sub: Label
 var message: Label
 var hint: Label
 
+var root: Control
+var flash_rect: ColorRect
+
 var _banner_time := 0.0
 var _message_time := 0.0
 var _message_dur := 1.0
+var _flash_time := 0.0
+var _flash_dur := 1.0
+var _flash_strength := 0.0
 
 
 func _ready() -> void:
 	layer = 10
 
-	var root := Control.new()
+	root = Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root)
@@ -28,6 +34,13 @@ func _ready() -> void:
 	banner_title = _make(root, 44, 104.0, 56.0, Color("#fde68a"))
 	banner_sub = _make(root, 24, 158.0, 30.0, Color("#fef3c7"))
 	message = _make(root, 112, 250.0, 150.0, Color("#fde68a"))
+
+	# flash de tela (gol): desenhado acima do texto, abaixo do menu
+	flash_rect = ColorRect.new()
+	flash_rect.color = Color(1.0, 1.0, 1.0, 0.0)
+	flash_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(flash_rect)
 
 	hint = Label.new()
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -39,7 +52,7 @@ func _ready() -> void:
 	hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	hint.offset_top = -52.0
 	hint.offset_bottom = -10.0
-	hint.text = "A/D mover   •   W pular   •   ESPAÇO chutar   •   SHIFT carrinho/pancada   •   R reiniciar"
+	hint.text = ""
 	root.add_child(hint)
 
 	set_score(0, 0)
@@ -99,6 +112,24 @@ func set_hint(text: String) -> void:
 	hint.text = text
 
 
+## Esconde todo o HUD de partida (usado no menu inicial).
+func set_ui_visible(v: bool) -> void:
+	root.visible = v
+
+
+func clear_message() -> void:
+	message.text = ""
+	_message_time = 0.0
+
+
+## Pisca a tela inteira na cor do time (usado no gol).
+func flash_screen(color: Color, strength := 0.4) -> void:
+	_flash_strength = clampf(strength, 0.0, 1.0)
+	_flash_dur = 0.5
+	_flash_time = _flash_dur
+	flash_rect.color = Color(color.r, color.g, color.b, _flash_strength)
+
+
 func _process(delta: float) -> void:
 	if _banner_time > 0.0:
 		_banner_time -= delta
@@ -110,3 +141,7 @@ func _process(delta: float) -> void:
 		message.modulate.a = clampf(_message_time / maxf(_message_dur * 0.5, 0.01), 0.0, 1.0)
 		if _message_time <= 0.0:
 			message.text = ""
+
+	if _flash_time > 0.0:
+		_flash_time = maxf(0.0, _flash_time - delta)
+		flash_rect.color.a = _flash_strength * (_flash_time / _flash_dur)
