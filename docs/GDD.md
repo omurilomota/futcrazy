@@ -12,17 +12,20 @@ bugs físicos, animações desajeitadas e situações inesperadas são features.
 | --- | --- | --- |
 | Câmera | arcade lateral fixa (ortográfica, campo inteiro visível) | leitura imediata da física, sem custo de câmera |
 | Controle | física livre estilo Gang Beasts: impulso, torque, cambaleio | o corpo é a piada |
-| Adversário | 1 jogador (teclado) x bot simples | testável sozinho hoje, sem custo de netcode |
+| Adversário | 1 jogador (teclado) x bot simples, ou 2 jogadores no mesmo teclado | testável sozinho hoje, sem custo de netcode |
 | Visual | low-poly cartunesco com primitivas, tudo por código | MVP sem depender de pipeline de modelagem |
+| Áudio | sintetizado por script (`tools/gen_audio.py`) | som no MVP sem licença de asset |
 | Eventos | os 7 do conceito, com combos | é o coração do jogo |
 
 ## Core loop
 
 1. Partida 1x1, 2 minutos, gol em qualquer lado (campo curto: 16m de comprimento).
+   Menu inicial escolhe 1 jogador x bot ou 2 jogadores no mesmo teclado.
 2. Correr, pular, chutar, dar carrinho. Tudo por física: chutar forte empurra quem chutou.
 3. A cada 10–16s um evento é avisado (`⚠ PREPARE-SE`) e ativado por ~10s.
 4. Combos (35%) fazem dois eventos ao mesmo tempo.
-5. Gol → banner, tremor de câmera, kickoff. Fim do tempo → vencedor e `R` para reiniciar.
+5. Gol → banner, flash, tremor de câmera, kickoff. Fim do tempo → vencedor, `R` para
+   revanche e `ESC` para o menu. `ESC` pausa a qualquer momento.
 
 ## Pilares
 
@@ -40,16 +43,19 @@ bugs físicos, animações desajeitadas e situações inesperadas são features.
 - Bola: RigidBody3D, bounce 0.62, arrasto baixo, limite de 36 m/s, squash visual no impacto.
 - Eventos: `EventManager` com aviso, ativação, duração, combos e limpeza.
 - Estádio procedural: gramado listrado, gols com trave colidível, arquibancada, torcida em MultiMesh, placas, nuvens.
+- Áudio procedural: pool de efeitos com variação de pitch + ambiência de torcida em loop, com intensidade que sobe em chutes, pancadas e gols.
+- Feedback: poeira em pousos/carrinhos/chutes, rastro na bola veloz, flash de tela no gol, squash no corpo e na bola.
+- Fluxo: menu (1P/2P), pausa, fim de jogo com revanche.
 
 ## Fora do escopo do MVP
 
-Áudio, multiplayer, goleiros, modelos no Blender, ragdoll real (`PhysicalBoneSimulator3D`),
-narração, modos de jogo extras, seleção de eventos, placar persistente.
+Multiplayer online, goleiros, modelos no Blender, ragdoll real (`PhysicalBoneSimulator3D`),
+seleção de eventos, placar persistente.
 
 ## Roadmap sugerido
 
-1. **0.2 — Sabor**: áudio (chute, torcida, gol), vibração de tela, comemoração, replay simples.
+1. **0.2 — Sabor** ✅: áudio sintetizado, 2 jogadores locais, menu/pausa, partículas e flash.
 2. **0.3 — Corpo**: humanoide articulado no Blender + ragdoll real nas pancadas.
-3. **0.4 — Gente**: 2 jogadores locais, bot preenchendo time.
+3. **0.4 — Gente**: multiplayer online + bot preenchendo time.
 4. **0.5 — Mais caos**: novos eventos, eventos específicos por time, editor de eventos.
-5. **1.0 — Online**: netcode, matchmaking, ranking.
+5. **1.0 — Produto**: modos de jogo, progressão, ranking.
