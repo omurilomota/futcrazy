@@ -70,10 +70,17 @@ Formato: `<emoji> <tipo>(escopo): descrição no imperativo, minúscula, sem pon
 | 🔥 | chore | remoção de código |
 | 🚀 | chore | release |
 
-Escopos usados: `player`, `ball`, `bot`, `eventos`, `hud`, `stadium`, `game`, `git`, `docs`.
+Escopos usados: `player`, `ball`, `bot`, `eventos`, `hud`, `menu`, `audio`, `fx`, `stadium`, `game`, `git`, `docs`.
 
 ## Qualidade mínima antes de abrir PR
 
 ```bash
 godot --headless --path . -- --smoke
+```
+
+Se mexer em `tools/gen_audio.py`, regere e versione os sons:
+
+```bash
+python3 tools/gen_audio.py
+godot --headless --path . --import
 ```

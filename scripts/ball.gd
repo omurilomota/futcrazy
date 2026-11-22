@@ -12,8 +12,10 @@ var modifiers: Dictionary = {}
 
 var mesh_root: Node3D
 var sphere: MeshInstance3D
+var trail: CPUParticles3D
 
 var _squash := 0.0
+var _sfx_cd := 0.0
 var _base_material: StandardMaterial3D
 
 
@@ -94,6 +96,9 @@ func _build_visuals() -> void:
 		patch.position = d * (MIN_RADIUS * 0.9)
 		mesh_root.add_child(patch)
 
+	# rastro: só aparece quando a bola voa rápido
+	trail = Fx.trail(self, Color("#f8fafc"), 26)
+
 
 func _physics_process(delta: float) -> void:
 	# campo de trampolim: a bola ganha energia a cada toque no chão
@@ -114,11 +119,21 @@ func _physics_process(delta: float) -> void:
 	var s := clampf(_squash, -0.4, 0.4)
 	mesh_root.scale = Vector3(1.0 + s, 1.0 - s, 1.0 + s)
 
+	_sfx_cd = maxf(0.0, _sfx_cd - delta)
+	if trail != null:
+		trail.emitting = linear_velocity.length() > 13.0
 
-func _on_body_entered(_body: Node) -> void:
+
+func _on_body_entered(body: Node) -> void:
 	var sp := linear_velocity.length()
 	if sp > 5.0:
 		squash(clampf(sp / 45.0, 0.05, 0.25))
+	if sp > 7.0 and _sfx_cd <= 0.0 and game != null and game.has_method("sfx_play"):
+		_sfx_cd = 0.09
+		var vol := lerpf(-18.0, -4.0, clampf(sp / 28.0, 0.0, 1.0))
+		game.sfx_play("bounce", vol, clampf(1.6 - sp * 0.02, 0.7, 1.45))
+		if global_position.y < 1.2 and body is StaticBody3D:
+			game.spawn_dust(global_position - Vector3(0.0, MIN_RADIUS * 0.7, 0.0), Color("#dbe7cf"), 5.0, 0.7)
 
 
 func squash(amount: float) -> void:

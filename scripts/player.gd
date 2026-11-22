@@ -36,6 +36,15 @@ var color_body := Color("#3b82f6")
 var goal_dir := 1.0
 var facing := 1.0
 
+## Teclas deste jogador: mapas ação -> lista de Key. Trocado pelo game.gd conforme o modo.
+var keys: Dictionary = {
+	"left": [KEY_A, KEY_LEFT],
+	"right": [KEY_D, KEY_RIGHT],
+	"jump": [KEY_W, KEY_UP],
+	"kick": [KEY_SPACE],
+	"tackle": [KEY_SHIFT, KEY_J],
+}
+
 var modifiers: Dictionary = {}
 
 # comandos (escritos pelo teclado ou pelo BotBrain)
@@ -383,7 +392,7 @@ func _rebuild() -> void:
 # ---------------------------------------------------------------- loop físico
 
 func _physics_process(delta: float) -> void:
-	if not _built:
+	if not _built or freeze:
 		return
 
 	kick_cd_left = maxf(0.0, kick_cd_left - delta)
@@ -401,6 +410,8 @@ func _physics_process(delta: float) -> void:
 		_squash = 0.2
 		if _prev_vy < -13.0:
 			stun(0.3)
+		if game != null and game.has_method("spawn_dust"):
+			game.spawn_dust(global_position + Vector3(0.0, -_cur_h * 0.5 + 0.06, 0.0), Color("#dbe7cf"), clampf(-_prev_vy * 0.9, 5.0, 16.0), clampf(-_prev_vy * 0.06, 0.7, 1.4))
 
 	_read_input(delta)
 
@@ -443,13 +454,20 @@ func _read_input(delta: float) -> void:
 	if not is_human:
 		return
 
-	if Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT):
+	if _key_down(keys.get("left", [])):
 		input_move -= 1.0
-	if Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT):
+	if _key_down(keys.get("right", [])):
 		input_move += 1.0
-	want_jump = Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP)
-	want_kick = Input.is_physical_key_pressed(KEY_SPACE)
-	want_tackle = Input.is_physical_key_pressed(KEY_SHIFT) or Input.is_physical_key_pressed(KEY_J)
+	want_jump = _key_down(keys.get("jump", []))
+	want_kick = _key_down(keys.get("kick", []))
+	want_tackle = _key_down(keys.get("tackle", []))
+
+
+func _key_down(list: Array) -> bool:
+	for k in list:
+		if Input.is_physical_key_pressed(k):
+			return true
+	return false
 
 
 func _move(delta: float) -> void:
@@ -518,6 +536,9 @@ func _tackle() -> void:
 		return
 	tackle_cd_left = TACKLE_CD
 	tackle_window = TACKLE_WINDOW
+
+	if game != null and game.has_method("spawn_dust"):
+		game.spawn_dust(global_position + Vector3(-facing * 0.45, -_cur_h * 0.5 + 0.08, 0.0), Color("#dbe7cf"), 7.0, 1.1)
 
 	var v := linear_velocity
 	v.x = facing * TACKLE_SPEED * get_stat("speed")
@@ -601,6 +622,8 @@ func _bounce_if_trampoline() -> void:
 		v.y = 12.5
 		linear_velocity = v
 		_squash = -0.25
+		if game.has_method("sfx_play"):
+			game.sfx_play("bounce", -12.0, 1.6)
 
 
 func stun(seconds: float) -> void:

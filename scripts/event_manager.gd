@@ -87,6 +87,8 @@ func _queue_new() -> void:
 
 	warn_left = warn_time
 	_update_banner()
+	if game.has_method("sfx_play"):
+		game.sfx_play("event", -14.0, 1.0)
 	print("[EVENTO] aviso: ", _join(pending))
 
 
@@ -121,6 +123,8 @@ func _activate() -> void:
 			e.time_left = duration_override
 		active.append(e)
 		fired_ids[e.id] = true
+		if game.has_method("sfx_play"):
+			game.sfx_play("event", -4.0, 1.32)
 		print("[EVENTO] ativo: ", e.id)
 	pending.clear()
 	_update_banner()
