@@ -1,61 +1,81 @@
-# GDD — FutCrazy (MVP)
+# GDD — FutCrazy
 
 ## Pitch
 
 **Não é um simulador de futebol. É um jogo de comédia física cujo cenário é uma partida de futebol.**
 A partida começa normal e vai perdendo a seriedade. A diversão vem antes do realismo:
-bugs físicos, animações desajeitadas e situações inesperadas são features.
+trombadas, animações desajeitadas e situações inesperadas são features.
 
-## Decisões fechadas para o MVP
+## Decisões fechadas
 
 | Decisão | Escolha | Motivo |
 | --- | --- | --- |
-| Câmera | arcade lateral fixa (ortográfica, campo inteiro visível) | leitura imediata da física, sem custo de câmera |
-| Controle | física livre estilo Gang Beasts: impulso, torque, cambaleio | o corpo é a piada |
-| Adversário | 1 jogador (teclado) x bot simples, ou 2 jogadores no mesmo teclado | testável sozinho hoje, sem custo de netcode |
-| Visual | low-poly cartunesco com primitivas, tudo por código | MVP sem depender de pipeline de modelagem |
-| Áudio | sintetizado por script (`tools/gen_audio.py`) | som no MVP sem licença de asset |
-| Eventos | os 7 do conceito, com combos | é o coração do jogo |
+| Câmera | arcade lateral fixa; aberta no campo todo | leitura imediata da física, sem custo de câmera |
+| Controle | física livre: impulso, torque, cambaleio, stun | o corpo é a piada |
+| Adversário | bot simples; 2P local; time no campo todo | testável sozinho, sem netcode |
+| Visual | low-poly cartunesco com primitivas, tudo por código | sem pipeline de modelagem |
+| Áudio | sintetizado por script | som sem licença de asset |
+| Eventos | 7 eventos com combos, sobrevivem ao gol | é o coração do jogo |
+
+## Modos
+
+| Modo | Campo | Times | Controle |
+| --- | --- | --- | --- |
+| **1 x BOT** | 16 m, câmera fixa | 1 x 1 | você x bot |
+| **2 JOGADORES** | 16 m, câmera fixa | 1 x 1 | teclado compartilhado |
+| **CAMPO TODO** | 24 m, câmera aberta | 5 x 5 com goleiros | você + 4 bots x 5 bots |
+
+No campo todo, o humano controla sempre o jogador de linha azul mais perto da bola
+(seta amarela), com troca automática e histerese de 1,4 m + cooldown de 0,6 s. Os bots
+restantes mantêm formação deslocada pela bola; o mais próximo da bola persegue.
 
 ## Core loop
 
-1. Partida 1x1, 2 minutos, gol em qualquer lado (campo curto: 16m de comprimento).
-   Menu inicial escolhe 1 jogador x bot ou 2 jogadores no mesmo teclado.
+1. Partida de 2 minutos, gol em qualquer lado, kickoff com contagem.
 2. Correr, pular, chutar, dar carrinho. Tudo por física: chutar forte empurra quem chutou.
-3. A cada 10–16s um evento é avisado (`⚠ PREPARE-SE`) e ativado por ~10s.
-4. Combos (35%) fazem dois eventos ao mesmo tempo.
-5. Gol → banner, flash, tremor de câmera, kickoff. Fim do tempo → vencedor, `R` para
-   revanche e `ESC` para o menu. `ESC` pausa a qualquer momento.
+3. A cada 10–16 s um evento é avisado (`⚠ PREPARE-SE`) e ativado por ~10 s.
+4. Combos (35%) fazem dois eventos ao mesmo tempo; o evento continua valendo após o gol.
+5. Gol → banner, flash, tremor, kickoff. Fim do tempo → vencedor, `R` revanche, `ESC` menu.
 
 ## Pilares
 
 - **Legibilidade**: evento sempre anunciado antes de mudar as regras.
-- **Independência**: cada evento liga/desliga só o seu efeito (modificadores aditivos por id).
-- **Controle apesar do caos**: o jogador nunca fica sem controle por mais de ~1s (stun curto e volta de pé).
+- **Independência**: cada evento liga/desliga só o seu efeito (modificadores por id).
+- **Controle apesar do caos**: stun curto e volta de pé garantida.
 - **Física como piada**: nada de ragdoll permanente.
 
-## Sistemas do MVP
+## Sistemas
 
-- Física 2.5D: corpos rígidos em 3D com deslocamento travado em Z (profundidade) e rotação livre só no plano da tela.
-- Jogador: RigidBody3D + cápsula (corpo) + esfera (cabeça), controle por velocidade com aceleração limitada, torque de inclinação, torque de reequilíbrio, stun com flail e "levantar com pulinho".
-- Chute: impulso na bola com recuo no jogador, alcance e potência moduláveis por evento.
-- Carrinho/pancada: dash + verificação de alcance, impulso e stun no alvo.
-- Bola: RigidBody3D, bounce 0.62, arrasto baixo, limite de 36 m/s, squash visual no impacto.
+- Física 2.5D: corpos rígidos 3D com Z travado e rotação livre só no plano da tela.
+- Jogador: caixa + esfera de cabeça, centro de massa baixo, torque de reequilíbrio,
+  chute com recuo, carrinho com janela de acerto, stun com flail e "levantar com pulinho".
+- Papéis: `field` (linha) e `gk` (goleiro, boné amarelo, sempre corta para frente).
+- Bola: bounce 0.62, limite de 36 m/s, squash, rastro acima de 13 m/s.
+- Goleiro: fica na linha, sai até 1,3 m na direção da bola, pula em bola alta e dá
+  carrinho quando a bola chega rápida.
 - Eventos: `EventManager` com aviso, ativação, duração, combos e limpeza.
-- Estádio procedural: gramado listrado, gols com trave colidível, arquibancada, torcida em MultiMesh, placas, nuvens.
-- Áudio procedural: pool de efeitos com variação de pitch + ambiência de torcida em loop, com intensidade que sobe em chutes, pancadas e gols.
-- Feedback: poeira em pousos/carrinhos/chutes, rastro na bola veloz, flash de tela no gol, squash no corpo e na bola.
-- Fluxo: menu (1P/2P), pausa, fim de jogo com revanche.
+- Estádio: gramado listrado, linhas/áreas/círculo central, traves colidíveis, rede,
+  arquibancada, torcida em MultiMesh, placas e torres de luz — dimensionado pelo campo.
+- Áudio: pool de efeitos com pitch variado + ambiência em loop com intensidade.
+- Fluxo: menu (3 modos), pausa, fim de jogo; preview `@tool` no editor.
 
-## Fora do escopo do MVP
+## Regras de borda
 
-Multiplayer online, goleiros, modelos no Blender, ragdoll real (`PhysicalBoneSimulator3D`),
-seleção de eventos, placar persistente.
+- Carrinho não atinge companheiro de time (exceto na briga generalizada).
+- Bola fora: volta como lateral perto de onde saiu; bola parada sem ninguém por 6 s
+  volta ao centro.
+- Evento ativo não é cancelado no gol; só é limpo ao acabar o tempo, reiniciar ou sair.
 
-## Roadmap sugerido
+## Fora do escopo atual
 
-1. **0.2 — Sabor** ✅: áudio sintetizado, 2 jogadores locais, menu/pausa, partículas e flash.
-2. **0.3 — Corpo**: humanoide articulado no Blender + ragdoll real nas pancadas.
-3. **0.4 — Gente**: multiplayer online + bot preenchendo time.
-4. **0.5 — Mais caos**: novos eventos, eventos específicos por time, editor de eventos.
-5. **1.0 — Produto**: modos de jogo, progressão, ranking.
+Multiplayer online, goleiros controláveis, modelos no Blender, ragdoll real
+(`PhysicalBoneSimulator3D`), seleção de eventos, placar persistente.
+
+## Roadmap
+
+1. **0.1 — Base** ✅: 1x1, 7 eventos, estádio, HUD, smoke test.
+2. **0.2 — Sabor** ✅: áudio, 2P local, menu/pausa, partículas.
+3. **0.3 — Campo todo** ✅: 5x5 com goleiros, formação, troca de jogador, correções.
+4. **0.4 — Corpo**: humanoide articulado no Blender + ragdoll real.
+5. **0.5 — Mais caos**: novos eventos, eventos por time, modos extras (primeiro a 5).
+6. **1.0 — Produto**: progressão, online, ranking.
