@@ -21,8 +21,8 @@ func _ready() -> void:
 
 	_title = _label(96, Color("#fde68a"), 128.0, 130.0)
 	_sub = _label(22, Color("#dbeafe"), 258.0, 60.0)
-	_body = _label(30, Color("#f8fafc"), 330.0, 170.0)
-	_foot = _label(20, Color("#a9b8ca"), 556.0, 90.0)
+	_body = _label(29, Color("#f8fafc"), 322.0, 210.0)
+	_foot = _label(20, Color("#a9b8ca"), 566.0, 90.0)
 
 
 func _label(size: int, color: Color, top: float, height: float) -> Label:
@@ -46,7 +46,7 @@ func show_main() -> void:
 	_title.text = "FUTCRAZY"
 	_title.add_theme_color_override("font_color", Color("#fde68a"))
 	_sub.text = "não é um simulador de futebol.\né comédia física com cenário de futebol."
-	_body.text = "[ 1 ]   UM JOGADOR  x  BOT\n\n[ 2 ]   DOIS JOGADORES  (mesmo teclado)"
+	_body.text = "[ 1 ]   UM JOGADOR  x  BOT\n\n[ 2 ]   DOIS JOGADORES  (mesmo teclado)\n\n[ 3 ]   CAMPO TODO   5 x 5  com goleiros"
 	_foot.text = "A/D mover • W pular • ESPAÇO chutar • SHIFT carrinho\nESC pausa   •   R reinicia a partida"
 
 

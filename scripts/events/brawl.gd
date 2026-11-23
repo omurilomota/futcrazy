@@ -24,4 +24,5 @@ func clear() -> void:
 	game.brawl = false
 	for p in game.players:
 		p.remove_modifier(id)
-	game.hud.set_hint("A/D mover   •   W pular   •   ESPAÇO chutar   •   SHIFT carrinho/pancada   •   R reiniciar")
+	if game.has_method("restore_hint"):
+		game.restore_hint()

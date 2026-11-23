@@ -11,6 +11,7 @@ var message: Label
 var hint: Label
 
 var root: Control
+var mode_label: Label
 var flash_rect: ColorRect
 
 var _banner_time := 0.0
@@ -54,6 +55,20 @@ func _ready() -> void:
 	hint.offset_bottom = -10.0
 	hint.text = ""
 	root.add_child(hint)
+
+	mode_label = Label.new()
+	mode_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	mode_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	mode_label.add_theme_font_size_override("font_size", 18)
+	mode_label.add_theme_color_override("font_color", Color("#dbeafe"))
+	mode_label.add_theme_constant_override("outline_size", 5)
+	mode_label.add_theme_color_override("font_outline_color", Color(0.03, 0.05, 0.08, 0.95))
+	mode_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	mode_label.offset_left = -380.0
+	mode_label.offset_right = -18.0
+	mode_label.offset_top = 14.0
+	mode_label.offset_bottom = 42.0
+	root.add_child(mode_label)
 
 	set_score(0, 0)
 	set_clock(Cfg.MATCH_TIME)
@@ -110,6 +125,10 @@ func flash(text: String, color: Color, seconds := 1.6) -> void:
 
 func set_hint(text: String) -> void:
 	hint.text = text
+
+
+func set_mode_label(text: String) -> void:
+	mode_label.text = text
 
 
 ## Esconde todo o HUD de partida (usado no menu inicial).
