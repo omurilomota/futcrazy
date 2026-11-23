@@ -1,10 +1,15 @@
 class_name Cfg
 extends RefCounted
 
-## Dimensões e regras globais do MVP.
+## Dimensões e regras globais do jogo.
 ## Campo jogado no plano XY (profundidade Z travada) = "2.5D".
+## O tamanho do campo muda por modo: o game.gd troca Cfg.field_half antes de montar.
 
-const FIELD_HALF := 8.0          ## metade do comprimento do campo (gol em x = +/- FIELD_HALF)
+const HALF_ARCADE := 8.0          ## modo arcade (1x1 / 2P): campo curto, tela fixa
+const HALF_FIELD := 12.0          ## modo campo todo (5x5): campo maior, câmera aberta
+
+static var field_half := HALF_ARCADE   ## valor ativo do modo atual
+
 const GOAL_H := 2.9              ## altura da boca do gol
 const GOAL_DEPTH := 1.5          ## profundidade da rede
 const GOAL_HALF_W := 1.25        ## meia largura da boca do gol em Z (só visual/colisão)

@@ -36,6 +36,13 @@ var color_body := Color("#3b82f6")
 var goal_dir := 1.0
 var facing := 1.0
 
+## Papel no time: "field" (linha) ou "gk" (goleiro, só no campo todo).
+var role := "field"
+var home_x := 0.0
+var marker: MeshInstance3D
+var cap: MeshInstance3D
+var _marker_y := 1.0
+
 ## Teclas deste jogador: mapas ação -> lista de Key. Trocado pelo game.gd conforme o modo.
 var keys: Dictionary = {
 	"left": [KEY_A, KEY_LEFT],
@@ -93,10 +100,11 @@ var head_shape: CollisionShape3D
 var head_sphere: SphereShape3D
 
 
-func setup(g: Node, team_id: int, human: bool) -> void:
+func setup(g: Node, team_id: int, human: bool, role_name := "field") -> void:
 	game = g
 	team = team_id
 	is_human = human
+	role = role_name
 	color_body = Cfg.TEAM_A_COLOR if team_id == 0 else Cfg.TEAM_B_COLOR
 	goal_dir = 1.0 if team_id == 0 else -1.0
 	facing = goal_dir
@@ -119,11 +127,12 @@ func setup(g: Node, team_id: int, human: bool) -> void:
 
 	_build_nodes()
 	_build_visuals()
+	_build_marker()
 	_rebuild()
 	_built = true
 
 	if not is_human:
-		brain = BotBrain.new()
+		brain = BotBrain.new(role, home_x)
 
 
 # ---------------------------------------------------------------- construção
@@ -213,6 +222,16 @@ func _build_visuals() -> void:
 	hair.scale = Vector3(1.02, 0.62, 1.02)
 	hair.material_override = _mat(Color("#2b2b33"))
 	head_root.add_child(hair)
+
+	# boné do goleiro (aparece só quando role == "gk")
+	cap = MeshInstance3D.new()
+	var capm := BoxMesh.new()
+	capm.size = Vector3(0.42, 0.10, 0.42)
+	cap.mesh = capm
+	cap.position = Vector3(0.0, 0.25, 0.04)
+	cap.material_override = _mat(Color("#facc15"), 0.6)
+	cap.visible = false
+	head_root.add_child(cap)
 
 	# pernas
 	leg_l = Node3D.new()
@@ -388,6 +407,12 @@ func _rebuild() -> void:
 			hand.position = Vector3(0.0, -arm_len, 0.0)
 			hand.scale = Vector3.ONE * size * 1.1
 
+	if cap != null:
+		cap.visible = role == "gk"
+	_marker_y = half + head_r * 2.0 + 0.65
+	if marker != null:
+		marker.position = Vector3(0.0, _marker_y, 0.0)
+
 
 # ---------------------------------------------------------------- loop físico
 
@@ -519,7 +544,9 @@ func _kick() -> void:
 		return
 
 	var dir_x := facing
-	if absf(to.x) > 0.12:
+	if role == "gk":
+		dir_x = goal_dir
+	elif absf(to.x) > 0.12:
 		dir_x = signf(to.x)
 	var direction := Vector3(dir_x, 0.0, 0.0)
 	var power: float = KICK_POWER * get_stat("kick_power")
@@ -557,6 +584,8 @@ func _check_hits() -> void:
 		if other == null or other == self:
 			continue
 		var other_player: Player = other
+		if other_player.team == team and not in_brawl:
+			continue
 		var d := global_position.distance_to(other_player.global_position)
 		var reach: float = 1.35 * get_stat("size") + other_player.body_radius()
 		if d > reach:
@@ -631,6 +660,34 @@ func stun(seconds: float) -> void:
 	_flail_t = 0.0
 
 
+func is_gk() -> bool:
+	return role == "gk"
+
+
+## Seta a seta flutuante do jogador controlado (modo campo todo).
+func set_marked(v: bool) -> void:
+	if marker != null:
+		marker.visible = v
+
+
+func _build_marker() -> void:
+	marker = MeshInstance3D.new()
+	marker.name = "Marker"
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.0
+	cm.bottom_radius = 0.17
+	cm.height = 0.30
+	cm.radial_segments = 4
+	marker.mesh = cm
+	marker.rotation.z = PI
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color("#fde68a")
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	marker.material_override = m
+	marker.visible = false
+	add_child(marker)
+
+
 func _animate(delta: float) -> void:
 	if rig == null:
 		return
@@ -659,3 +716,7 @@ func _animate(delta: float) -> void:
 	rig.scale = Vector3(1.0 + sq, 1.0 - sq * 1.2, 1.0 + sq)
 	if absf(_squash) > 0.01:
 		_squash = move_toward(_squash, 0.0, delta * 2.6)
+
+	if marker != null and marker.visible:
+		marker.rotation.y += delta * 2.2
+		marker.position.y = _marker_y + sin(Time.get_ticks_msec() * 0.004) * 0.07

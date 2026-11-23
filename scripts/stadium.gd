@@ -1,17 +1,21 @@
 class_name Stadium
 extends Node3D
 
-## Estádio low-poly 100% procedural: gramado listrado, gols, arquibancadas,
-## torcida (MultiMesh), placas, torres de luz e um sol direcional com sombra.
-
-const PITCH_W := 34.0
-const PITCH_D := 36.0
-const PITCH_Z := -2.0
+## Estádio low-poly 100% procedural, dimensionado pelo campo ativo
+## (o game.gd remonta quando muda entre arcade e campo todo).
 
 var ground_mat: PhysicsMaterial
+var pitch_w := 32.0
+var pitch_d := 36.0
+var pitch_z := -2.0
 
 
 func build(_game: Node) -> void:
+	pitch_w = Cfg.field_half * 2.0 + 16.0
+	# o campo todo precisa de mais profundidade: senão a borda do gramado aparece
+	# no rodapé da tela e sobra uma faixa de céu embaixo (borda de trás fica em z = -20)
+	pitch_d = 36.0 + maxf(0.0, Cfg.field_half - Cfg.HALF_ARCADE) * 4.0
+	pitch_z = -20.0 + pitch_d * 0.5
 	_build_ground()
 	_build_stands()
 	_build_goal(-1.0)
@@ -38,6 +42,10 @@ func _mesh_box(size: Vector3, pos: Vector3, color: Color) -> MeshInstance3D:
 	return mi
 
 
+func _line(pos: Vector3, size: Vector3, color := Color("#e8f2e8")) -> void:
+	_mesh_box(size, Vector3(pos.x, 0.0, pos.z), color)
+
+
 func _solid_box(size: Vector3, pos: Vector3) -> StaticBody3D:
 	var body := StaticBody3D.new()
 	body.collision_layer = 1
@@ -55,34 +63,59 @@ func _solid_box(size: Vector3, pos: Vector3) -> StaticBody3D:
 # ------------------------------------------------------------------- gramado
 
 func _build_ground() -> void:
-	var body := _solid_box(Vector3(PITCH_W, 1.0, PITCH_D), Vector3(0.0, -0.5, PITCH_Z))
+	var body := _solid_box(Vector3(pitch_w, 1.0, pitch_d), Vector3(0.0, -0.5, pitch_z))
 	ground_mat = PhysicsMaterial.new()
 	ground_mat.bounce = 0.3
 	ground_mat.friction = 1.0
 	body.physics_material_override = ground_mat
 
 	# grama: topo exatamente em y = 0
-	_mesh_box(Vector3(PITCH_W, 0.4, PITCH_D), Vector3(0.0, -0.2, PITCH_Z), Color("#2c8a53"))
+	_mesh_box(Vector3(pitch_w, 0.4, pitch_d), Vector3(0.0, -0.2, pitch_z), Color("#2c8a53"))
 
 	# listras
-	var stripes := 17
-	var w := PITCH_W / float(stripes)
+	var stripes := maxi(12, int(round(pitch_w / 2.0)))
+	var w := pitch_w / float(stripes)
 	for i in stripes:
 		var c := Color("#2c8a53") if i % 2 == 0 else Color("#34975d")
-		_mesh_box(Vector3(w, 0.02, PITCH_D), Vector3(-PITCH_W * 0.5 + w * (i + 0.5), -0.008, PITCH_Z), c)
+		_mesh_box(Vector3(w, 0.02, pitch_d), Vector3(-pitch_w * 0.5 + w * (i + 0.5), -0.008, pitch_z), c)
 
 	# linhas
-	var line_col := Color("#e8f2e8")
+	var h: float = Cfg.field_half
 	var line_d := 30.0
-	_mesh_box(Vector3(0.14, 0.012, line_d), Vector3(0.0, 0.0, 0.0), line_col)
-	_mesh_box(Vector3(0.14, 0.012, line_d), Vector3(-Cfg.FIELD_HALF, 0.0, 0.0), line_col)
-	_mesh_box(Vector3(0.14, 0.012, line_d), Vector3(Cfg.FIELD_HALF, 0.0, 0.0), line_col)
+	for x in [-h, 0.0, h]:
+		_line(Vector3(x, 0.0, 0.0), Vector3(0.14, 0.012, line_d))
+
+	# círculo central (torus deitado no gramado)
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 1.85
+	tm.outer_radius = 1.95
+	tm.rings = 28
+	tm.ring_segments = 4
+	ring.mesh = tm
+	ring.material_override = _flat(Color("#e8f2e8"))
+	ring.rotation.x = PI * 0.5
+	ring.position = Vector3(0.0, 0.012, 0.0)
+	add_child(ring)
+
+	# áreas (grande e pequena) dos dois lados
+	for side in [-1.0, 1.0]:
+		var s: float = float(side)
+		var gx: float = h * s
+		var box_x: float = gx - s * 3.2
+		var ga_x: float = gx - s * 1.4
+		_line(Vector3(box_x, 0.0, 0.0), Vector3(0.14, 0.012, 6.4))
+		_line(Vector3(box_x + s * 1.6, 0.0, -3.2), Vector3(3.1, 0.012, 0.14))
+		_line(Vector3(box_x + s * 1.6, 0.0, 3.2), Vector3(3.1, 0.012, 0.14))
+		_line(Vector3(ga_x, 0.0, 0.0), Vector3(0.14, 0.012, 3.8))
+		_line(Vector3(ga_x + s * 0.7, 0.0, -1.9), Vector3(1.3, 0.012, 0.14))
+		_line(Vector3(ga_x + s * 0.7, 0.0, 1.9), Vector3(1.3, 0.012, 0.14))
 
 
 # --------------------------------------------------------------------- gols
 
 func _build_goal(side: float) -> void:
-	var gx := Cfg.FIELD_HALF * side
+	var gx := Cfg.field_half * side
 	var h := Cfg.GOAL_H
 	var post := 0.14
 	var white := Color("#f8fafc")
@@ -126,7 +159,7 @@ func _build_stands() -> void:
 	for i in 3:
 		var z := -13.2 - float(i) * 1.7
 		var y := 0.3 + float(i) * 1.3
-		_mesh_box(Vector3(PITCH_W, 1.3, 1.7), Vector3(0.0, y, z), seat_colors[i])
+		_mesh_box(Vector3(pitch_w, 1.3, 1.7), Vector3(0.0, y, z), seat_colors[i])
 
 	# torcida
 	var mm := MultiMesh.new()
@@ -137,7 +170,7 @@ func _build_stands() -> void:
 	mm.mesh = person
 
 	var rows := 3
-	var per_row := 140
+	var per_row := int(round(pitch_w * 4.2))
 	mm.instance_count = rows * per_row
 
 	var palette := [
@@ -149,7 +182,7 @@ func _build_stands() -> void:
 		var z := -13.2 - float(r) * 1.7 + 0.12
 		var y := 0.3 + float(r) * 1.3 + 0.9
 		for j in per_row:
-			var x := randf_range(-PITCH_W * 0.46, PITCH_W * 0.46)
+			var x := randf_range(-pitch_w * 0.46, pitch_w * 0.46)
 			var sc := Vector3(1.0, randf_range(0.85, 1.2), 1.0)
 			mm.set_instance_transform(idx, Transform3D(Basis.IDENTITY.scaled(sc), Vector3(x, y, z)))
 			mm.set_instance_color(idx, palette[randi() % palette.size()])
@@ -169,9 +202,9 @@ func _build_stands() -> void:
 		Color("#5b21b6"), Color("#9f1239"),
 	]
 	var board_w := 3.2
-	var x := -PITCH_W * 0.5 + board_w * 0.5
+	var x := -pitch_w * 0.5 + board_w * 0.5
 	var k := 0
-	while x < PITCH_W * 0.5 - board_w * 0.5:
+	while x < pitch_w * 0.5 - board_w * 0.5:
 		_mesh_box(Vector3(board_w - 0.22, 0.75, 0.12), Vector3(x, 0.48, -12.4), ads[k % ads.size()])
 		# faixa branca no topo da placa
 		_mesh_box(Vector3(board_w - 0.34, 0.14, 0.02), Vector3(x, 0.74, -12.33), Color("#cfd8e3"))
@@ -181,7 +214,7 @@ func _build_stands() -> void:
 
 func _build_masts() -> void:
 	for sx in [-1.0, 1.0]:
-		var x: float = 14.5 * float(sx)
+		var x: float = (pitch_w * 0.5 - 2.0) * float(sx)
 		_mesh_box(Vector3(0.22, 5.5, 0.22), Vector3(x, 2.75, -17.5), Color("#334155"))
 		_mesh_box(Vector3(1.6, 0.3, 0.5), Vector3(x, 5.5, -17.5), Color("#475569"))
 		_mesh_box(Vector3(1.3, 0.12, 0.35), Vector3(x, 5.35, -17.5), Color("#fef9c3"))
@@ -193,5 +226,5 @@ func _build_lights() -> void:
 	sun.light_energy = 1.1
 	sun.light_color = Color("#fff4dc")
 	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 70.0
+	sun.directional_shadow_max_distance = 80.0
 	add_child(sun)
