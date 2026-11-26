@@ -1,3 +1,4 @@
+@tool
 class_name Stadium
 extends Node3D
 
@@ -8,6 +9,11 @@ var ground_mat: PhysicsMaterial
 var pitch_w := 32.0
 var pitch_d := 36.0
 var pitch_z := -2.0
+
+var brand_label: Label3D
+var _flags: Array[Node3D] = []
+var _scoreboard_parts: Array[Node3D] = []
+var _scoreboard_visible := true
 
 
 func build(_game: Node) -> void:
@@ -21,6 +27,9 @@ func build(_game: Node) -> void:
 	_build_goal(-1.0)
 	_build_goal(1.0)
 	_build_masts()
+	_build_scoreboard()
+	_build_corner_flags()
+	_build_props()
 	_build_lights()
 
 
@@ -196,10 +205,13 @@ func _build_stands() -> void:
 	mmi.material_override = crowd_mat
 	add_child(mmi)
 
-	# placas de publicidade
+	# placas de publicidade (com nomes fictícios: nada de marca real)
 	var ads := [
 		Color("#1e3a8a"), Color("#92400e"), Color("#115e59"),
 		Color("#5b21b6"), Color("#9f1239"),
+	]
+	var ad_texts := [
+		"GALO ENERGY", "BOLA & CIA", "TÁTICA ZERO", "QUIQUE.COM", "FUT CRAZY",
 	]
 	var board_w := 3.2
 	var x := -pitch_w * 0.5 + board_w * 0.5
@@ -208,8 +220,115 @@ func _build_stands() -> void:
 		_mesh_box(Vector3(board_w - 0.22, 0.75, 0.12), Vector3(x, 0.48, -12.4), ads[k % ads.size()])
 		# faixa branca no topo da placa
 		_mesh_box(Vector3(board_w - 0.34, 0.14, 0.02), Vector3(x, 0.74, -12.33), Color("#cfd8e3"))
+		var label := _label3d(ad_texts[k % ad_texts.size()], 40, Vector3(x, 0.44, -12.32), Color("#f8fafc"))
+		label.pixel_size = 0.0055
 		x += board_w
 		k += 1
+
+
+## Placar do estádio: painel grande na frente da arquibancada, acima das placas.
+func _build_scoreboard() -> void:
+	var panel := _mesh_box(Vector3(8.6, 1.9, 0.18), Vector3(0.0, 2.95, -12.75), Color("#0b1220"))
+	panel.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_scoreboard_parts.append(panel)
+	_scoreboard_parts.append(_mesh_box(Vector3(8.9, 0.1, 0.22), Vector3(0.0, 3.94, -12.74), Color("#facc15")))
+	_scoreboard_parts.append(_mesh_box(Vector3(0.1, 1.9, 0.22), Vector3(-4.35, 2.95, -12.74), Color("#facc15")))
+	_scoreboard_parts.append(_mesh_box(Vector3(0.1, 1.9, 0.22), Vector3(4.35, 2.95, -12.74), Color("#facc15")))
+
+	# O placar ao vivo fica no HUD. Duplicar o mesmo 0 x 0 em dois lugares da tela
+	# deixava a leitura confusa, então o painel do estádio carrega a marca do jogo.
+	brand_label = _label3d("FUTCRAZY", 104, Vector3(0.0, 3.08, -12.62), Color("#f4e9cf"))
+	brand_label.outline_size = 0
+	_scoreboard_parts.append(brand_label)
+	var sub := _label3d("ESTÁDIO DA VÁRZEA · 2026", 32, Vector3(0.0, 2.28, -12.62), Color("#facc15"))
+	sub.outline_size = 0
+	_scoreboard_parts.append(sub)
+
+
+## No menu o placar do estadio fica atras do cartaz e cortado: melhor esconder.
+func set_scoreboard_visible(v: bool) -> void:
+	if v == _scoreboard_visible:
+		return
+	_scoreboard_visible = v
+	for n in _scoreboard_parts:
+		if is_instance_valid(n):
+			n.visible = v
+
+
+## Bandeirinhas de canto no fundo do campo, balançando.
+func _build_corner_flags() -> void:
+	for sx in [-1.0, 1.0]:
+		var x: float = (Cfg.field_half + 0.45) * float(sx)
+		_mesh_box(Vector3(0.05, 1.5, 0.05), Vector3(x, 0.75, -6.4), Color("#e2e8f0"))
+		var pivot := Node3D.new()
+		pivot.position = Vector3(x, 1.42, -6.4)
+		add_child(pivot)
+		var flag := _mesh_box(Vector3(0.5, 0.32, 0.02), Vector3(0.25, 0.0, 0.0), Color("#f97316"))
+		# reparenta sem perder a transformada global
+		remove_child(flag)
+		flag.position = Vector3(0.25, 0.0, 0.0)
+		pivot.add_child(flag)
+		_flags.append(pivot)
+
+
+## Props feitos no Blender (tools/blender/make_props.py) e importados como GLB.
+func _build_props() -> void:
+	var mascot := _add_glb("res://assets/models/mascot.glb", Vector3(-pitch_w * 0.33, 0.0, -11.1), 1.15)
+	if mascot != null:
+		mascot.name = "Mascot"
+	_mesh_box(Vector3(1.5, 0.65, 1.5), Vector3(pitch_w * 0.33, 0.32, -11.1), Color("#334155"))
+	var trophy := _add_glb("res://assets/models/trophy.glb", Vector3(pitch_w * 0.33, 0.66, -11.1), 1.7)
+	if trophy != null:
+		trophy.name = "Trophy"
+
+
+func _add_glb(path: String, pos: Vector3, scale_mult: float) -> Node3D:
+	if not ResourceLoader.exists(path):
+		return null
+	var packed := load(path) as PackedScene
+	if packed == null:
+		return null
+	var inst := packed.instantiate() as Node3D
+	if inst == null:
+		return null
+	inst.position = pos
+	inst.scale = Vector3.ONE * scale_mult
+	add_child(inst)
+	return inst
+
+
+func _label3d(text: String, size: int, pos: Vector3, color: Color) -> Label3D:
+	var l := Label3D.new()
+	l.text = text
+	l.font_size = size
+	l.pixel_size = 0.006
+	l.modulate = color
+	l.outline_size = 14
+	l.outline_modulate = Color(0.02, 0.03, 0.06, 1.0)
+	l.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.position = pos
+	add_child(l)
+	return l
+
+
+## Remove a geometria montada. Necessário ao trocar o tamanho do campo, porque as
+## medidas do estádio dependem de Cfg.field_half.
+func clear() -> void:
+	for child in get_children():
+		remove_child(child)
+		child.queue_free()
+	_flags.clear()
+	_scoreboard_parts.clear()
+	_scoreboard_visible = true
+
+
+func _process(delta: float) -> void:
+	if Engine.is_editor_hint():
+		return
+	var t := Time.get_ticks_msec() * 0.001
+	for i in _flags.size():
+		_flags[i].rotation.y = sin(t * 2.4 + float(i) * 1.7) * 0.5
 
 
 func _build_masts() -> void:
