@@ -6,6 +6,10 @@ extends RefCounted
 ##          deslocada pela posição da bola (dá sensação de time, não de enxame).
 ## - gk: fica na linha do gol, sai um pouco atrás da bola, pula e corta.
 
+## Quanto maior, mais afiado o bot. Indice = Settings.bot_difficulty().
+## TRANQUILO erra mais e hesita; MALVADO fecha o angulo e arrisca mais carrinho.
+const SKILL := [0.62, 1.0, 1.22]
+
 var role := "field"
 var slot_x := 0.0
 
@@ -45,9 +49,11 @@ func _think_gk(p: Player, ball: Ball, delta: float) -> void:
 	if inward == 0.0:
 		inward = p.goal_dir
 
+	var skill: float = SKILL[Settings.bot_difficulty()]
+
 	# fica perto da linha, mas sai um pouco na direção da bola
 	var target_x := own_x + inward * clampf(absf(bx - own_x) * 0.2, 0.4, 1.3)
-	var drift := clampf((target_x - p.global_position.x) * 2.6, -1.0, 1.0)
+	var drift := clampf((target_x - p.global_position.x) * 2.6 * skill, -1.0, 1.0)
 	p.input_move = drift
 
 	var d := absf(bx - p.global_position.x)
@@ -90,7 +96,8 @@ func _think_field(p: Player, ball: Ball, delta: float) -> void:
 		# formação acompanha a bola (time inteiro sobe e desce junto)
 		target_x = clampf(slot_x + bx * 0.5, -h + 1.4, h - 1.4)
 
-	var drift := clampf((target_x - px) * 2.0 + _jitter * 0.3, -1.0, 1.0)
+	var skill: float = SKILL[Settings.bot_difficulty()]
+	var drift := clampf((target_x - px) * (1.2 + 0.8 * skill) + _jitter * 0.3, -1.0, 1.0)
 	# às vezes o bot se atrapalha e trava por um instante (comédia + jogabilidade)
 	if _panic_t > 0.0:
 		drift *= 0.2
@@ -107,10 +114,11 @@ func _think_field(p: Player, ball: Ball, delta: float) -> void:
 		p.want_jump = true
 
 	var tackle_chance := 0.02 if (p.game.brawl or p.team == 0 and d < 1.6) else 0.004
-	if randf() < tackle_chance:
+	if randf() < tackle_chance * skill:
 		p.want_tackle = true
 
-	if randf() < 0.0007:
+	# bot atrapalhado de proposito: quanto menor a dificuldade, mais ele trava
+	if randf() < 0.0007 * (2.0 - skill):
 		_panic_t = randf_range(0.25, 0.6)
 
 
