@@ -21,41 +21,26 @@ const MODE_ARCADE := 1
 const MODE_LOCAL := 2
 const MODE_FIELD := 3
 
-const HINT_1P := "A/D mover  •  W pular  •  ESPAÇO chutar  •  SHIFT carrinho  •  ESC pausa  •  R reiniciar"
-const HINT_2P := "AZUL  A/D • W • ESPAÇO • SHIFT        VERMELHO  ←/→ • ↑ • ENTER • CTRL        ESC pausa"
-const HINT_FIELD := "VOCÊ CONTROLA O JOGADOR MAIS PERTO DA BOLA   •   A/D  W  ESPAÇO  SHIFT   •   ESC pausa"
+## As teclas vivem no gerenciador central (Settings/InputMap); o HUD monta a dica
+## a partir do que estiver configurado, então remapear não deixa a ajuda mentindo.
 
-const KEYS_SOLO := {
-	"left": [KEY_A, KEY_LEFT],
-	"right": [KEY_D, KEY_RIGHT],
-	"jump": [KEY_W, KEY_UP],
-	"kick": [KEY_SPACE],
-	"tackle": [KEY_SHIFT, KEY_J],
-}
-const KEYS_P1 := {
-	"left": [KEY_A],
-	"right": [KEY_D],
-	"jump": [KEY_W],
-	"kick": [KEY_SPACE],
-	"tackle": [KEY_SHIFT],
-}
-const KEYS_P2 := {
-	"left": [KEY_LEFT],
-	"right": [KEY_RIGHT],
-	"jump": [KEY_UP],
-	"kick": [KEY_ENTER, KEY_KP_ENTER],
-	"tackle": [KEY_CTRL, KEY_KP_0],
-}
+## Sistemas fixos vêm da cena (main.tscn) com nomes explícitos: abra a cena no
+## editor e você vê Camera, Stadium, Ball, Sfx, Events, Hud e Menu na árvore.
+## Só os jogadores são criados em tempo de execução, porque a quantidade depende
+## do modo (2 ou 10).
+@onready var stadium: Stadium = $Stadium
+@onready var ball: Ball = $Ball
+@onready var cam: Camera3D = $Camera
+@onready var hud: Hud = $Hud
+@onready var events: EventManager = $Events
+@onready var sfx: Sfx = $Sfx
+@onready var menu: MenuScreen = $Menu
 
-var stadium: Stadium
-var ball: Ball
 var players: Array[Player] = []
 var controlled: Player
-var cam: Camera3D
-var hud: Hud
-var events: EventManager
-var sfx: Sfx
-var menu: MenuScreen
+
+## 0 = menu. 1/2/3 = entra direto no modo (útil em cenas de desenvolvimento).
+@export_enum("Menu", "1 jogador", "2 jogadores", "Campo todo") var autostart_mode := 0
 
 var match_state := "menu"
 var prev_state := "play"
@@ -65,16 +50,19 @@ var score := [0, 0]
 var clock := Cfg.MATCH_TIME
 var trampoline := false
 var brawl := false
+var slope := 0.0
 
 var stats := {"kicks": 0, "tackles": 0, "hits": 0, "goals": 0}
 
 var shake := 0.0
 var smoke := false
 var smoke_campo := false
+var smoke_ui := false
 var _shot := false
 var _shot_done := false
 var _shot_menu := false
 var _shot_mode := MODE_ARCADE
+var _shot_screen := ""
 var _shot_at := 5000
 var _excite := 0.3
 
@@ -87,13 +75,16 @@ var _layout_mode := 0
 var _human_teams: Array = [0]
 var _switch_cd := 0.0
 var _stuck_t := 0.0
+var events_override := false   ## testes fixam o ritmo dos eventos e ignoram as opções
+
+var _finishing := false
 
 var _smoke_t := 0.0
 var _smoke_stage := 0
 var _smoke_ok := true
 var _smoke_goal_at := 6.0
 var _smoke_check_at := 7.5
-var _smoke_end := 34.0
+var _smoke_end := 55.0
 var _sample_t := 0.0
 var _upright_samples := 0
 var _upright_ok := 0
@@ -102,11 +93,7 @@ var _upright_ok := 0
 func _ready() -> void:
 	# ------------------------------------------------ preview dentro do editor
 	if Engine.is_editor_hint():
-		_build_environment()
-		_build_camera()
-		ball = Ball.new()
-		ball.name = "Ball"
-		add_child(ball)
+		_setup_camera()
 		ball.setup(self)
 		_human_teams = [0]
 		_apply_layout(MODE_ARCADE)
@@ -124,10 +111,14 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	smoke = "--smoke" in args
 	smoke_campo = "--smoke-campo" in args
+	smoke_ui = "--smoke-ui" in args
 	_shot_menu = "--shot-menu" in args
 	var shot_campo := "--shot-campo" in args
 	_shot_mode = MODE_FIELD if shot_campo else MODE_ARCADE
-	_shot = "--shot" in args or _shot_menu or shot_campo
+	for screen in ["modes", "options", "controls", "credits", "pause", "result"]:
+		if ("--shot-%s" % screen) in args:
+			_shot_screen = screen
+	_shot = "--shot" in args or _shot_menu or shot_campo or _shot_screen != ""
 
 	if smoke or smoke_campo:
 		Engine.time_scale = 2.0
@@ -137,37 +128,28 @@ func _ready() -> void:
 		_smoke_check_at = 5.5
 		_smoke_end = 16.0
 
-	_build_environment()
-	_build_camera()
-
-	ball = Ball.new()
-	ball.name = "Ball"
-	add_child(ball)
+	_setup_camera()
 	ball.setup(self)
 	ball.global_position = Vector3(0.0, 1.4, 0.0)
-
-	hud = Hud.new()
-	hud.name = "Hud"
-	add_child(hud)
-
-	sfx = Sfx.new()
-	sfx.name = "Sfx"
-	add_child(sfx)
-
-	events = EventManager.new()
-	events.name = "Events"
-	add_child(events)
 	events.setup(self)
 
-	menu = MenuScreen.new()
-	menu.name = "Menu"
-	add_child(menu)
+	menu.sfx = sfx
+	menu.mode_selected.connect(start_match)
+	menu.resume_requested.connect(_resume)
+	menu.restart_requested.connect(restart)
+	menu.menu_requested.connect(_open_menu)
+	menu.quit_requested.connect(_quit_game)
 
 	_human_teams = [0]
 	_apply_layout(MODE_ARCADE)
 
+	if smoke_ui:
+		_run_ui_smoke()
+		return
+
 	if smoke:
 		# bot x bot, tudo acelerado e na ordem do pool para exercitar os 7 eventos
+		events_override = true
 		events.use_sequence = true
 		events.min_gap = 0.4
 		events.max_gap = 1.0
@@ -187,6 +169,7 @@ func _ready() -> void:
 			p.is_human = false
 			p.brain = BotBrain.new("field", p.home_x)
 	elif smoke_campo:
+		events_override = true
 		events.min_gap = 2.0
 		events.max_gap = 3.0
 		events.warn_time = 0.5
@@ -197,56 +180,48 @@ func _ready() -> void:
 			p.is_human = false
 			p.brain = BotBrain.new(p.role, p.home_x)
 	elif _shot:
-		if _shot_menu:
+		# telas de menu sao capturadas a partir do proprio menu (fluxo real)
+		# e apenas pausa/resultado precisam de uma partida montada
+		_shot_at = 1400
+		if _shot_menu or _shot_screen in ["modes", "options", "controls", "credits"]:
 			_open_menu()
-			_shot_at = 1400
+			match _shot_screen:
+				"modes":
+					menu.show_modes()
+				"options":
+					menu.show_options("main")
+				"controls":
+					menu.show_controls("main")
+				"credits":
+					menu.show_credits()
 		else:
 			start_match(_shot_mode)
 			Engine.time_scale = 0.35
-			if _shot_mode == MODE_FIELD:
-				_shot_at = 3400
+			_shot_at = 3400 if _shot_mode == MODE_FIELD else 2200
+			if _shot_screen == "pause":
+				_pause()
+			elif _shot_screen == "result":
+				score[0] = 3
+				score[1] = 2
+				stats["goals"] = 5
+				stats["kicks"] = 41
+				stats["tackles"] = 12
+				stats["hits"] = 9
+				_end_match()
+	elif autostart_mode > 0:
+		start_match(autostart_mode)
 	else:
 		_open_menu()
 
 
 # ---------------------------------------------------------------- montagem
 
-func _build_environment() -> void:
-	var we := WorldEnvironment.new()
-	we.name = "WorldEnvironment"
-	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color("#79c6f2")
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color("#cfe8ff")
-	env.ambient_light_energy = 0.5
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	we.environment = env
-	add_child(we)
-
-
-func _build_camera() -> void:
-	cam = Camera3D.new()
-	cam.name = "Camera"
-	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
-	cam.size = 11.5
-	cam.near = 0.05
-	cam.far = 120.0
-	cam.position = CAM_POS
-	add_child(cam)
-	cam.look_at(CAM_TARGET, Vector3.UP)
+## A câmera vem posicionada da cena para enquadrar o editor; aqui só garantimos
+## que ela olhe para o alvo e que o tremor tenha um ponto de referência.
+func _setup_camera() -> void:
 	cam.current = true
+	cam.look_at(CAM_TARGET, Vector3.UP)
 	_cam_pos = cam.global_position
-
-
-func _build_stadium() -> void:
-	if stadium != null:
-		remove_child(stadium)
-		stadium.queue_free()
-	stadium = Stadium.new()
-	stadium.name = "Stadium"
-	add_child(stadium)
-	stadium.build(self)
 
 
 ## Troca o tamanho do campo, o zoom da câmera e a quantidade de jogadores.
@@ -254,8 +229,9 @@ func _apply_layout(m: int) -> void:
 	var changed := m != _layout_mode
 	_layout_mode = m
 	Cfg.field_half = Cfg.HALF_FIELD if m == MODE_FIELD else Cfg.HALF_ARCADE
-	if stadium == null or changed:
-		_build_stadium()
+	if changed or stadium.get_child_count() == 0:
+		stadium.clear()
+		stadium.build(self)
 	cam.size = 15.6 if m == MODE_FIELD else 11.5
 	_spawn_players(_team_size_for(m))
 
@@ -295,6 +271,7 @@ func _spawn_players(team_size: int) -> void:
 			add_child(p)
 			p.setup(self, team, false, role_name)
 			p.home_x = float(slots[i])
+			p.action_prefix = "p2" if team == 1 else "p1"
 			p.brain = BotBrain.new(role_name, p.home_x)
 			players.append(p)
 
@@ -333,21 +310,20 @@ func start_match(new_mode := MODE_ARCADE) -> void:
 	_excite = 0.35
 	trampoline = false
 	brawl = false
+	slope = 0.0
 	_stuck_t = 0.0
-	clock = Cfg.MATCH_TIME
+	clock = Settings.match_time()
 	menu.hide_all()
 
 	events.enabled = true
 	events.reset()
+	_apply_event_settings()
 	_apply_layout(mode)
 	controlled = _initial_controlled()
 	_reassign_control()
 
-	for p in players:
-		if p.team == 1:
-			p.keys = KEYS_P2
-		else:
-			p.keys = KEYS_P1 if mode == MODE_LOCAL else KEYS_SOLO
+	# no modo 2P o P2 usa as setas; no 1P as setas também ajudam o P1
+	Settings.apply_input_map(mode == MODE_LOCAL)
 
 	hud.set_ui_visible(true)
 	hud.set_mode_label(_mode_label())
@@ -370,6 +346,7 @@ func _open_menu() -> void:
 	hud.set_hint("")
 	hud.clear_banner()
 	hud.clear_message()
+	hud.set_active_events([])
 	ball.freeze = true
 	for p in players:
 		p.freeze = true
@@ -378,22 +355,46 @@ func _open_menu() -> void:
 	sfx.set_intensity(0.18)
 
 
+func _apply_event_settings() -> void:
+	if events_override:
+		return
+	var gap := Settings.event_gap_scale()
+	events.min_gap = 10.0 * gap
+	events.max_gap = 16.0 * gap
+	events.combo_chance = Settings.event_combo_chance()
+
+
 func _mode_label() -> String:
 	match mode:
 		MODE_LOCAL:
 			return "2 JOGADORES • ARCADE"
 		MODE_FIELD:
-			return "CAMPO TODO • 5 x 5 COM GOLEIROS"
+			return "CAMPO TODO • 5x5"
 		_:
 			return "1 x BOT • ARCADE"
 
 
 func _hint_for_mode() -> String:
 	if mode == MODE_LOCAL:
-		return HINT_2P
+		return "%s        %s        ESC pausa" % [_keys_hint("p1"), _keys_hint("p2")]
 	if mode == MODE_FIELD:
-		return HINT_FIELD
-	return HINT_1P
+		return "VOCÊ CONTROLA O JOGADOR MAIS PERTO DA BOLA   •   %s   •   ESC pausa" % _keys_hint("p1")
+	return "%s   •   ESC pausa   •   R reiniciar" % _keys_hint("p1")
+
+
+## Dica de controles montada a partir das teclas configuradas de verdade.
+func _keys_hint(prefix: String) -> String:
+	var who := ""
+	if mode == MODE_LOCAL:
+		who = "AZUL  " if prefix == "p1" else "VERMELHO  "
+	return "%s%s/%s mover • %s pular • %s chutar • %s carrinho" % [
+		who,
+		Settings.key_label(Settings.key_for(prefix + "_left")),
+		Settings.key_label(Settings.key_for(prefix + "_right")),
+		Settings.key_label(Settings.key_for(prefix + "_jump")),
+		Settings.key_label(Settings.key_for(prefix + "_kick")),
+		Settings.key_label(Settings.key_for(prefix + "_tackle")),
+	]
 
 
 func restore_hint() -> void:
@@ -472,6 +473,7 @@ func _physics_process(delta: float) -> void:
 			clock = maxf(0.0, clock - delta)
 			hud.set_clock(clock)
 			_update_control(delta)
+			_apply_slope()
 			_check_goal()
 			if match_state == "play":
 				_check_ball_out()
@@ -505,35 +507,33 @@ func _just(key: int) -> bool:
 
 
 func _handle_keys() -> void:
-	if smoke or smoke_campo:
+	if smoke or smoke_campo or smoke_ui:
 		return
 
+	if _just(KEY_F11):
+		Settings.toggle_fullscreen()
+
 	if match_state == "menu":
-		if _just(KEY_1) or _just(KEY_KP_1) or _just(KEY_ENTER):
-			start_match(MODE_ARCADE)
-		elif _just(KEY_2) or _just(KEY_KP_2):
-			start_match(MODE_LOCAL)
-		elif _just(KEY_3) or _just(KEY_KP_3):
-			start_match(MODE_FIELD)
+		if _just(KEY_ESCAPE):
+			menu.back()
 		return
 
 	if match_state == "paused":
+		# ESC volta um nivel: fecha confirmacao, sai de opcoes/controles ou retoma
 		if _just(KEY_ESCAPE) or _just(KEY_P):
-			_resume()
-		elif _just(KEY_ENTER) or _just(KEY_KP_ENTER):
-			_open_menu()
+			menu.back()
 		return
 
-	if _just(KEY_ESCAPE):
-		if match_state == "end":
+	if match_state == "end":
+		if _just(KEY_ESCAPE):
 			_open_menu()
-		else:
-			_pause()
+			return
+	elif _just(KEY_ESCAPE):
+		_pause()
 		return
 
 	if _just(KEY_R) and Time.get_ticks_msec() - _start_ms > 900:
-		if match_state == "play" or match_state == "goal" or match_state == "countdown" or match_state == "end":
-			restart()
+		restart()
 
 
 func _pause() -> void:
@@ -545,7 +545,10 @@ func _pause() -> void:
 	ball.freeze = true
 	for p in players:
 		p.freeze = true
-	menu.show_pause()
+	menu.show_pause(
+		"%s   %d  x  %d   %s" % [Cfg.TEAM_A_NAME, score[0], score[1], Cfg.TEAM_B_NAME],
+		"%02d:%02d  ·  %s" % [int(clock) / 60, int(clock) % 60, _mode_label()]
+	)
 	sfx.play("ui", -10.0, 0.8)
 
 
@@ -561,6 +564,19 @@ func _resume() -> void:
 
 
 # ---------------------------------------------------------------- gols
+
+## Campo inclinado: força lateral constante no chão (jogadores + bola).
+func _apply_slope() -> void:
+	if absf(slope) < 0.01:
+		if cam != null and absf(cam.rotation.z) > 0.0005:
+			cam.rotation.z = 0.0
+		return
+	for p in players:
+		p.apply_central_force(Vector3(slope * p.mass, 0.0, 0.0))
+	ball.apply_central_force(Vector3(slope * ball.mass * 2.4, 0.0, 0.0))
+	if cam != null:
+		cam.rotation.z = clampf(-slope * 0.004, -0.02, 0.02)
+
 
 func _check_goal() -> void:
 	var bp := ball.global_position
@@ -634,9 +650,14 @@ func _on_goal(team_id: int) -> void:
 	spawn_dust(ball.global_position, col, 16.0, 1.5)
 	ball.freeze = true
 	ball.linear_velocity = Vector3.ZERO
+	# comemoração do time que marcou
+	for p in players:
+		if p.team == team_id and not p.is_gk():
+			p.celebrate(1.7)
 	# eventos NÃO são cancelados no gol: no modo campo todo eles sobrevivem ao kickoff
 	match_state = "goal"
-	state_timer = Cfg.GOAL_PAUSE
+	# nos testes, pausa curta: senão os gols comem o tempo da sequência de eventos
+	state_timer = 0.4 if (smoke or smoke_campo) else Cfg.GOAL_PAUSE
 	print("[GOL] time %d | placar %d x %d" % [team_id, score[0], score[1]])
 
 
@@ -663,7 +684,7 @@ func _start_countdown() -> void:
 	match_state = "countdown"
 	state_timer = 0.2 if _shot else (0.4 if (smoke or smoke_campo) else Cfg.START_COUNTDOWN)
 	_last_count = -1
-	clock = Cfg.MATCH_TIME
+	clock = Settings.match_time()
 	hud.set_score(score[0], score[1])
 	hud.set_clock(clock)
 	hud.clear_banner()
@@ -679,21 +700,29 @@ func _end_match() -> void:
 		p.want_kick = false
 		p.want_tackle = false
 	events.reset()
+	hud.set_active_events([])
+	hud.clear_banner()
+	hud.clear_message()
+	hud.set_ui_visible(false)
 	sfx.set_intensity(0.5)
 	sfx.play("whistle", -4.0, 0.92)
 
-	var res := "EMPATE!"
+	var headline := "EMPATE!"
 	if score[0] > score[1]:
-		res = "%s VENCE!" % Cfg.TEAM_A_NAME
+		headline = "%s VENCE" % Cfg.TEAM_A_NAME
 	elif score[1] > score[0]:
-		res = "%s VENCE!" % Cfg.TEAM_B_NAME
-	hud.flash(res, Color("#fde68a"), 6.0)
-	hud.show_banner(
-		"FIM DE JOGO",
-		"%d x %d  •  chutes %d  •  carrinhos %d\nR jogar de novo   •   ESC menu" % [score[0], score[1], stats["kicks"], stats["tackles"]],
-		Color("#f8fafc"),
-		0.0
-	)
+		headline = "%s VENCE" % Cfg.TEAM_B_NAME
+
+	menu.show_results({
+		"mode": _mode_label(),
+		"headline": headline,
+		"a": score[0],
+		"b": score[1],
+		"name_a": Cfg.TEAM_A_NAME,
+		"name_b": Cfg.TEAM_B_NAME,
+		"stats": stats.duplicate(),
+	})
+	sfx.play("event", -12.0, 0.8)
 	print("[FIM] %d x %d" % [score[0], score[1]])
 
 
@@ -708,7 +737,15 @@ func excite(v: float) -> void:
 	_excite = maxf(_excite, v)
 
 
+## Chamado pelo EventManager quando um evento (ou combo) começa.
+func on_event_started(e: GameEvent) -> void:
+	hud.flash_screen(e.color, 0.16)
+	excite(0.75)
+
+
 func spawn_dust(pos: Vector3, color := Color("#d6c9a8"), amount := 10.0, power := 1.0) -> void:
+	if not Settings.effects_enabled():
+		return
 	Fx.dust(self, pos, color, int(round(amount)), power)
 
 
@@ -752,16 +789,17 @@ func _process(delta: float) -> void:
 
 	if shake > 0.01:
 		shake = move_toward(shake, 0.0, delta * 2.6)
-		cam.global_position = _cam_pos + Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), 0.0) * shake * 0.32
+		var amp: float = shake * 0.32 * Settings.shake_scale()
+		cam.global_position = _cam_pos + Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), 0.0) * amp
 	else:
 		shake = 0.0
 		cam.global_position = _cam_pos
 
 	_excite = move_toward(_excite, 0.3, delta * 0.45)
-	if sfx != null:
-		sfx.set_intensity(_excite)
+	sfx.set_intensity(_excite)
+	stadium.set_scoreboard_visible(match_state != "menu")
 
-	if smoke or smoke_campo:
+	if (smoke or smoke_campo) and not _finishing:
 		_smoke_tick(delta)
 
 	if _shot and not _shot_done and Time.get_ticks_msec() - _start_ms > _shot_at:
@@ -780,7 +818,7 @@ func _save_shot() -> void:
 		players[1].global_position, players[1].global_rotation
 	])
 	print("[SHOT] salvo em .preview/preview.png (%d jogadores, campo %.0fm)" % [players.size(), Cfg.field_half * 2.0])
-	get_tree().quit(0)
+	_finish_and_quit(0)
 
 
 # ---------------------------------------------------------------- smoke test
@@ -852,7 +890,7 @@ func _smoke_finish() -> void:
 		score[0], score[1], stats["kicks"], stats["tackles"], stats["hits"], stats["goals"]
 	])
 	print("[SMOKE] RESULTADO: %s" % ("OK" if _smoke_ok else "FALHOU"))
-	get_tree().quit(0 if _smoke_ok else 1)
+	_finish_and_quit(0 if _smoke_ok else 1)
 
 
 func _smoke_finish_campo() -> void:
@@ -893,4 +931,187 @@ func _smoke_finish_campo() -> void:
 	print("[SMOKE] tempo ereto (amostra): %.0f%%" % (float(_upright_ok) / maxf(float(_upright_samples), 1.0) * 100.0))
 	print("[SMOKE] placar=%d x %d" % [score[0], score[1]])
 	print("[SMOKE] RESULTADO: %s" % ("OK" if _smoke_ok else "FALHOU"))
-	get_tree().quit(0 if _smoke_ok else 1)
+	_finish_and_quit(0 if _smoke_ok else 1)
+
+
+# ---------------------------------------------------------------- encerramento
+
+func _quit_game() -> void:
+	_shutdown_audio()
+	get_tree().quit(0)
+
+
+## Solta os streams antes de sair: sem isso o AudioServer mantem
+## AudioStreamWAV/AudioStreamPlaybackWAV vivos e o Godot reporta vazamento.
+func _shutdown_audio() -> void:
+	if sfx != null:
+		sfx.shutdown()
+
+
+## Encerra o audio, deixa o AudioServer reciclar os playbacks e só então sai.
+## Sem essa pequena espera o Godot reporta AudioStreamPlaybackWAV vivos ao fechar.
+func _finish_and_quit(code: int) -> void:
+	if _finishing:
+		return
+	_finishing = true
+	_shutdown_audio()
+	await get_tree().create_timer(0.25, true, false, true).timeout
+	_shutdown_audio()
+	get_tree().quit(code)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_shutdown_audio()
+		get_tree().quit(0)
+
+
+# ---------------------------------------------------------------- smoke de UI
+
+func _ui_check(cond: bool, label: String) -> bool:
+	if cond:
+		print("[SMOKE-UI] ok: %s" % label)
+	else:
+		printerr("[SMOKE-UI] FALHA: %s" % label)
+	return cond
+
+
+## Percorre os fluxos reais de interface e estado da partida, sem depender de teclado
+## ou de resultados aleatórios da física.
+func _run_ui_smoke() -> void:
+	var ok := true
+
+	_open_menu()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	ok = _ui_check(menu.is_open() and menu.current_screen() == "main", "menu principal abre") and ok
+	ok = _ui_check(menu.get_viewport().gui_get_focus_owner() != null, "menu principal dá foco ao primeiro botão") and ok
+
+	menu.show_modes()
+	await get_tree().process_frame
+	ok = _ui_check(menu.current_screen() == "modes", "tela de modos abre") and ok
+	menu.back()
+	await get_tree().process_frame
+	ok = _ui_check(menu.current_screen() == "main", "voltar de modos para o menu") and ok
+
+	for m in [MODE_ARCADE, MODE_LOCAL, MODE_FIELD]:
+		start_match(m)
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		var expected := 10 if m == MODE_FIELD else 2
+		ok = _ui_check(players.size() == expected, "modo %d monta %d jogadores" % [m, expected]) and ok
+		ok = _ui_check(not menu.is_open(), "modo %d esconde o menu" % m) and ok
+		ok = _ui_check(match_state == "countdown" or match_state == "play", "modo %d entra em contagem" % m) and ok
+		ok = _ui_check(hud.root.visible, "modo %d mostra o HUD" % m) and ok
+
+	start_match(MODE_LOCAL)
+	await get_tree().physics_frame
+	var prefixes := {}
+	for p in players:
+		prefixes[p.action_prefix] = true
+	ok = _ui_check(prefixes.size() == 2, "modo 2P tem dois esquemas de tecla") and ok
+
+	start_match(MODE_ARCADE)
+	await get_tree().physics_frame
+	_pause()
+	ok = _ui_check(match_state == "paused", "pausa congela o estado") and ok
+	ok = _ui_check(menu.current_screen() == "pause", "menu de pausa abre") and ok
+	var clock_paused := clock
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	ok = _ui_check(absf(clock - clock_paused) < 0.001, "relogio para durante a pausa") and ok
+	_resume()
+	ok = _ui_check(match_state != "paused", "retomada sai da pausa") and ok
+	ok = _ui_check(not menu.is_open(), "retomada fecha o menu") and ok
+
+	score[0] = 2
+	score[1] = 1
+	stats["goals"] = 3
+	_end_match()
+	await get_tree().process_frame
+	ok = _ui_check(match_state == "end", "fim de partida") and ok
+	ok = _ui_check(menu.current_screen() == "results", "tela de resultado abre") and ok
+	ok = _ui_check(not hud.root.visible, "HUD some no resultado") and ok
+
+	restart()
+	await get_tree().physics_frame
+	ok = _ui_check(score[0] == 0 and score[1] == 0, "revanche zera o placar") and ok
+	ok = _ui_check(hud.root.visible, "revanche devolve o HUD") and ok
+
+	_open_menu()
+	await get_tree().process_frame
+	ok = _ui_check(menu.current_screen() == "main", "volta ao menu principal") and ok
+
+	menu.show_options("main")
+	await get_tree().process_frame
+	ok = _ui_check(menu.current_screen() == "options", "tela de opcoes abre") and ok
+	menu.back()
+	await get_tree().process_frame
+	ok = _ui_check(menu.current_screen() == "main", "voltar de opcoes") and ok
+	menu.show_controls("main")
+	await get_tree().process_frame
+	ok = _ui_check(menu.current_screen() == "controls", "tela de controles abre") and ok
+	menu.back()
+	await get_tree().process_frame
+
+	# persistencia real em disco, devolvendo os valores originais no fim
+	var snapshot := {}
+	for key in GameSettings.DEFAULTS.keys():
+		snapshot[key] = Settings.get_value(key)
+	Settings.set_value("audio/master", 0.42)
+	Settings.save_settings()
+	Settings.load_settings()
+	ok = _ui_check(absf(Settings.master_volume() - 0.42) < 0.001, "configuracao persiste no disco") and ok
+	for key in snapshot.keys():
+		Settings.set_value(key, snapshot[key])
+	Settings.save_settings()
+
+	var old_key := Settings.key_for("p1_kick")
+	Settings.set_binding("p1_kick", KEY_K)
+	ok = _ui_check(Settings.key_for("p1_kick") == KEY_K, "remapear grava a tecla") and ok
+	ok = _ui_check(Settings.conflict_for("p1_jump", KEY_K) == "p1_kick", "conflito de tecla e detectado") and ok
+	ok = _ui_check(Settings.conflict_for("p1_jump", KEY_ESCAPE) == "PAUSA", "tecla reservada e recusada") and ok
+	Settings.set_binding("p1_kick", old_key)
+
+	# as opções precisam mudar o jogo, não só ficar salvas
+	Settings.set_value("video/ui_scale", 1.15)
+	ok = _ui_check(absf(get_window().content_scale_factor - 1.15) < 0.01, "escala da interface é aplicada") and ok
+	Settings.set_value("video/ui_scale", 1.0)
+
+	Settings.set_value("audio/sfx", 0.0)
+	var sfx_bus := AudioServer.get_bus_index(GameSettings.BUS_SFX)
+	ok = _ui_check(AudioServer.is_bus_mute(sfx_bus), "volume zero silencia o bus de efeitos") and ok
+	Settings.set_value("audio/sfx", 0.9)
+
+	Settings.set_value("a11y/shake", 0.0)
+	ok = _ui_check(absf(Settings.shake_scale()) < 0.001, "tremor pode ser desligado") and ok
+	Settings.set_value("a11y/shake", 1.0)
+
+	Settings.set_value("game/match_time", 60.0)
+	start_match(MODE_ARCADE)
+	await get_tree().physics_frame
+	ok = _ui_check(absf(clock - 60.0) < 0.5, "duração da partida vem das opções") and ok
+	Settings.set_value("game/match_time", 120.0)
+
+	start_match(MODE_ARCADE)
+	await get_tree().physics_frame
+	var residual := 0
+	for script in events.POOL:
+		var ev: GameEvent = script.new(self)
+		ev.apply()
+		ev.clear()
+		for p in players:
+			if p.has_modifier(ev.id):
+				residual += 1
+	ok = _ui_check(residual == 0, "eventos limpam seus modificadores") and ok
+	ok = _ui_check(_world_is_clean(), "eventos nao deixam estado global residual") and ok
+
+	_shutdown_audio()
+	ok = _ui_check(sfx.streams.is_empty(), "audio e liberado no encerramento") and ok
+
+	print("[SMOKE-UI] RESULTADO: %s" % ("OK" if ok else "FALHOU"))
+	_finish_and_quit(0 if ok else 1)
+
+
+func _world_is_clean() -> bool:
+	return absf(slope) < 0.001 and not trampoline and not brawl

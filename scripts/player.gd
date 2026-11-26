@@ -5,8 +5,10 @@ extends RigidBody3D
 ## o corpo é um RigidBody3D controlado por velocidade + torque, então
 ## empurrões, tombos e cambaleios saem de graça da simulação.
 ##
-## Modificadores de evento entram por add_modifier(id, {...}) e são
-## multiplicativos — assim dois eventos ao mesmo tempo não brigam.
+## Visual modular procedural (uniforme, meias, chuteiras, cabelo, rosto, luvas de
+## goleiro) com animação de personalidade: respira, olha em volta e comemora.
+## Modificadores de evento são multiplicativos por id, então eventos simultâneos
+## não brigam entre si.
 
 const BASE_RADIUS := 0.42
 const BASE_TORSO_H := 1.0
@@ -27,6 +29,8 @@ const SHOVE_IMPULSE := 70.0
 const UPRIGHT_K := 120.0
 const UPRIGHT_C := 14.0
 
+const HAIR_COLORS := [Color("#2b2b33"), Color("#5b3a1e"), Color("#d9b45b"), Color("#7c2d12")]
+
 var game: Node
 var team := 0
 var is_human := false
@@ -35,6 +39,7 @@ var brain: BotBrain
 var color_body := Color("#3b82f6")
 var goal_dir := 1.0
 var facing := 1.0
+var variant := 0
 
 ## Papel no time: "field" (linha) ou "gk" (goleiro, só no campo todo).
 var role := "field"
@@ -43,14 +48,9 @@ var marker: MeshInstance3D
 var cap: MeshInstance3D
 var _marker_y := 1.0
 
-## Teclas deste jogador: mapas ação -> lista de Key. Trocado pelo game.gd conforme o modo.
-var keys: Dictionary = {
-	"left": [KEY_A, KEY_LEFT],
-	"right": [KEY_D, KEY_RIGHT],
-	"jump": [KEY_W, KEY_UP],
-	"kick": [KEY_SPACE],
-	"tackle": [KEY_SHIFT, KEY_J],
-}
+## Prefixo das ações no InputMap: "p1" ou "p2". As teclas em si ficam no
+## gerenciador central (Settings), então remapear na tela de controles vale aqui.
+var action_prefix := "p1"
 
 var modifiers: Dictionary = {}
 
@@ -67,22 +67,28 @@ var kick_cd_left := 0.0
 var tackle_cd_left := 0.0
 var tackle_window := 0.0
 var kick_anim := 0.0
-var brawl_punch := false
 
 var _built := false
 var _cur_h := 0.0
 var _cur_r := BASE_RADIUS
 var _prev_vy := 0.0
 var _jump_latch := false
+var _jump_hold := false
 var _squash := 0.0
 var _run_phase := 0.0
 var _tilt_time := 0.0
 var _flail_t := 0.0
+var _idle_t := 0.0
+var _idle_phase := 0.0
+var _celebrate_t := 0.0
 
 var rig: Node3D
 var torso_mesh: MeshInstance3D
 var shorts_mesh: MeshInstance3D
+var shorts_stripe: MeshInstance3D
+var collar: MeshInstance3D
 var head_root: Node3D
+var hair_group: Node3D
 var leg_l: Node3D
 var leg_r: Node3D
 var arm_l: Node3D
@@ -91,8 +97,21 @@ var leg_mesh_l: MeshInstance3D
 var leg_mesh_r: MeshInstance3D
 var foot_l: MeshInstance3D
 var foot_r: MeshInstance3D
+var sole_l: MeshInstance3D
+var sole_r: MeshInstance3D
+var sock_l: MeshInstance3D
+var sock_r: MeshInstance3D
 var arm_mesh_l: MeshInstance3D
 var arm_mesh_r: MeshInstance3D
+var sleeve_l: MeshInstance3D
+var sleeve_r: MeshInstance3D
+var hand_l: MeshInstance3D
+var hand_r: MeshInstance3D
+var mouth: MeshInstance3D
+var brow_l: MeshInstance3D
+var brow_r: MeshInstance3D
+var ear_l: MeshInstance3D
+var ear_r: MeshInstance3D
 
 var body_shape: CollisionShape3D
 var body_box: BoxShape3D
@@ -108,6 +127,7 @@ func setup(g: Node, team_id: int, human: bool, role_name := "field") -> void:
 	color_body = Cfg.TEAM_A_COLOR if team_id == 0 else Cfg.TEAM_B_COLOR
 	goal_dir = 1.0 if team_id == 0 else -1.0
 	facing = goal_dir
+	_idle_phase = randf() * TAU
 
 	mass = BASE_MASS
 	gravity_scale = 1.0
@@ -164,15 +184,28 @@ func _mat(color: Color, rough := 0.9) -> StandardMaterial3D:
 
 
 func _build_visuals() -> void:
+	var skin := Color("#f0bd93")
+	var team_light := color_body.lightened(0.22)
+	var team_dark := color_body.darkened(0.45)
+
+	# ---------------------------------------------------------------- tronco
 	torso_mesh = MeshInstance3D.new()
 	torso_mesh.material_override = _mat(color_body)
 	rig.add_child(torso_mesh)
 
 	shorts_mesh = MeshInstance3D.new()
-	shorts_mesh.material_override = _mat(color_body.darkened(0.5))
+	shorts_mesh.material_override = _mat(team_dark)
 	rig.add_child(shorts_mesh)
 
-	# cabeça (escala aplicada no pai para "cabeção")
+	shorts_stripe = MeshInstance3D.new()
+	shorts_stripe.material_override = _mat(team_light, 0.7)
+	rig.add_child(shorts_stripe)
+
+	collar = MeshInstance3D.new()
+	collar.material_override = _mat(team_light, 0.6)
+	rig.add_child(collar)
+
+	# ---------------------------------------------------------------- cabeça
 	head_root = Node3D.new()
 	rig.add_child(head_root)
 
@@ -180,102 +213,207 @@ func _build_visuals() -> void:
 	var hs := SphereMesh.new()
 	hs.radius = 0.30
 	hs.height = 0.60
-	hs.radial_segments = 14
-	hs.rings = 8
+	hs.radial_segments = 16
+	hs.rings = 9
 	head_mesh.mesh = hs
-	head_mesh.material_override = _mat(Color("#f6c89f"))
+	head_mesh.material_override = _mat(skin)
 	head_root.add_child(head_mesh)
 
-	var eye_mat := _mat(Color("#171717"), 0.35)
+	var ear_mat := _mat(skin.darkened(0.08))
+	ear_l = MeshInstance3D.new()
+	ear_r = MeshInstance3D.new()
+	for ear in [ear_l, ear_r]:
+		var es := SphereMesh.new()
+		es.radius = 0.07
+		es.height = 0.14
+		es.radial_segments = 8
+		es.rings = 5
+		ear.mesh = es
+		ear.material_override = ear_mat
+		head_root.add_child(ear)
+
+	var eye_mat := _mat(Color("#1b1b22"), 0.3)
 	for sx in [-1.0, 1.0]:
 		var eye := MeshInstance3D.new()
 		var es := SphereMesh.new()
-		es.radius = 0.055
-		es.height = 0.11
+		es.radius = 0.058
+		es.height = 0.116
 		es.radial_segments = 8
 		es.rings = 4
 		eye.mesh = es
-		eye.position = Vector3(0.105 * sx, 0.045, 0.245)
+		eye.position = Vector3(0.105 * sx, 0.05, 0.245)
 		eye.material_override = eye_mat
 		head_root.add_child(eye)
 
+		# sobrancelha: dá personalidade sem custo
+		var brow := MeshInstance3D.new()
+		var bs := BoxMesh.new()
+		bs.size = Vector3(0.11, 0.022, 0.03)
+		brow.mesh = bs
+		brow.position = Vector3(0.105 * sx, 0.135, 0.262)
+		brow.rotation.z = -0.16 * sx
+		brow.material_override = _mat(HAIR_COLORS[variant % HAIR_COLORS.size()].darkened(0.15), 0.8)
+		head_root.add_child(brow)
+		if sx < 0.0:
+			brow_l = brow
+		else:
+			brow_r = brow
+
 	var nose := MeshInstance3D.new()
 	var ns := SphereMesh.new()
-	ns.radius = 0.055
-	ns.height = 0.11
+	ns.radius = 0.06
+	ns.height = 0.12
 	ns.radial_segments = 8
 	ns.rings = 4
 	nose.mesh = ns
-	nose.position = Vector3(0.0, -0.02, 0.285)
+	nose.position = Vector3(0.0, -0.015, 0.285)
 	nose.material_override = _mat(Color("#e0a87e"))
 	head_root.add_child(nose)
 
-	# cabelo (tampa baixa e escura)
-	var hair := MeshInstance3D.new()
-	var hm := SphereMesh.new()
-	hm.radius = 0.305
-	hm.height = 0.61
-	hm.radial_segments = 14
-	hm.rings = 6
-	hair.mesh = hm
-	hair.position = Vector3(0.0, 0.06, -0.02)
-	hair.scale = Vector3(1.02, 0.62, 1.02)
-	hair.material_override = _mat(Color("#2b2b33"))
-	head_root.add_child(hair)
+	mouth = MeshInstance3D.new()
+	var mos := BoxMesh.new()
+	mos.size = Vector3(0.11, 0.028, 0.02)
+	mouth.mesh = mos
+	mouth.position = Vector3(0.0, -0.10, 0.278)
+	mouth.material_override = _mat(Color("#7f1d1d"), 0.6)
+	head_root.add_child(mouth)
 
-	# boné do goleiro (aparece só quando role == "gk")
+	# cabelo por variante: todos os bonecos não parecem clones
+	hair_group = Node3D.new()
+	head_root.add_child(hair_group)
+	_build_hair()
+
+	# boné do goleiro
 	cap = MeshInstance3D.new()
 	var capm := BoxMesh.new()
-	capm.size = Vector3(0.42, 0.10, 0.42)
+	capm.size = Vector3(0.44, 0.10, 0.44)
 	cap.mesh = capm
-	cap.position = Vector3(0.0, 0.25, 0.04)
+	cap.position = Vector3(0.0, 0.27, 0.03)
 	cap.material_override = _mat(Color("#facc15"), 0.6)
 	cap.visible = false
 	head_root.add_child(cap)
 
-	# pernas
+	# ---------------------------------------------------------------- pernas
 	leg_l = Node3D.new()
 	leg_r = Node3D.new()
 	rig.add_child(leg_l)
 	rig.add_child(leg_r)
+
 	leg_mesh_l = MeshInstance3D.new()
 	leg_mesh_r = MeshInstance3D.new()
-	leg_mesh_l.material_override = _mat(Color("#f6c89f"))
-	leg_mesh_r.material_override = _mat(Color("#f6c89f"))
-	leg_l.add_child(leg_mesh_l)
-	leg_r.add_child(leg_mesh_r)
+	for mi in [leg_mesh_l, leg_mesh_r]:
+		mi.material_override = _mat(skin)
+		(leg_l if mi == leg_mesh_l else leg_r).add_child(mi)
+
+	sock_l = MeshInstance3D.new()
+	sock_r = MeshInstance3D.new()
+	for sock in [sock_l, sock_r]:
+		sock.material_override = _mat(color_body, 0.85)
+		(leg_l if sock == sock_l else leg_r).add_child(sock)
 
 	foot_l = MeshInstance3D.new()
 	foot_r = MeshInstance3D.new()
-	foot_l.material_override = _mat(Color("#111827"))
-	foot_r.material_override = _mat(Color("#111827"))
-	leg_l.add_child(foot_l)
-	leg_r.add_child(foot_r)
+	sole_l = MeshInstance3D.new()
+	sole_r = MeshInstance3D.new()
+	for foot in [foot_l, foot_r]:
+		foot.material_override = _mat(Color("#101827"), 0.5)
+		(leg_l if foot == foot_l else leg_r).add_child(foot)
+	for sole in [sole_l, sole_r]:
+		sole.material_override = _mat(Color("#f8fafc"), 0.4)
+		(leg_l if sole == sole_l else leg_r).add_child(sole)
 
-	# braços
+	# ---------------------------------------------------------------- braços
 	arm_l = Node3D.new()
 	arm_r = Node3D.new()
 	rig.add_child(arm_l)
 	rig.add_child(arm_r)
+
 	arm_mesh_l = MeshInstance3D.new()
 	arm_mesh_r = MeshInstance3D.new()
-	arm_mesh_l.material_override = _mat(color_body.darkened(0.12))
-	arm_mesh_r.material_override = _mat(color_body.darkened(0.12))
-	arm_l.add_child(arm_mesh_l)
-	arm_r.add_child(arm_mesh_r)
+	for mi in [arm_mesh_l, arm_mesh_r]:
+		mi.material_override = _mat(skin)
+		(arm_l if mi == arm_mesh_l else arm_r).add_child(mi)
 
-	var hand_mat := _mat(Color("#f6c89f"))
-	for pivot in [arm_l, arm_r]:
-		var hand := MeshInstance3D.new()
+	sleeve_l = MeshInstance3D.new()
+	sleeve_r = MeshInstance3D.new()
+	for sl in [sleeve_l, sleeve_r]:
+		sl.material_override = _mat(color_body)
+		(arm_l if sl == sleeve_l else arm_r).add_child(sl)
+
+	hand_l = MeshInstance3D.new()
+	hand_r = MeshInstance3D.new()
+	for hand in [hand_l, hand_r]:
 		var hsm := SphereMesh.new()
-		hsm.radius = 0.10
-		hsm.height = 0.20
+		hsm.radius = 0.105
+		hsm.height = 0.21
 		hsm.radial_segments = 8
-		hsm.rings = 4
+		hsm.rings = 5
 		hand.mesh = hsm
-		hand.material_override = hand_mat
-		pivot.add_child(hand)
-		hand.name = "Hand"
+		hand.material_override = _mat(skin)
+		(arm_l if hand == hand_l else arm_r).add_child(hand)
+
+
+func _build_hair() -> void:
+	var hair_col: Color = HAIR_COLORS[variant % HAIR_COLORS.size()]
+	var hair_mat := _mat(hair_col, 0.85)
+	var style := variant % 4
+
+	if style == 0:
+		# tampa clássica
+		var cap_mesh := MeshInstance3D.new()
+		var hm := SphereMesh.new()
+		hm.radius = 0.305
+		hm.height = 0.61
+		hm.radial_segments = 14
+		hm.rings = 6
+		cap_mesh.mesh = hm
+		cap_mesh.position = Vector3(0.0, 0.06, -0.02)
+		cap_mesh.scale = Vector3(1.02, 0.62, 1.02)
+		cap_mesh.material_override = hair_mat
+		hair_group.add_child(cap_mesh)
+	elif style == 1:
+		# espetado
+		for i in 5:
+			var spike := MeshInstance3D.new()
+			var cm := CylinderMesh.new()
+			cm.top_radius = 0.0
+			cm.bottom_radius = 0.075
+			cm.height = 0.22
+			cm.radial_segments = 6
+			spike.mesh = cm
+			var a := TAU * float(i) / 5.0
+			spike.position = Vector3(cos(a) * 0.15, 0.27, sin(a) * 0.15 - 0.02)
+			spike.rotation.z = cos(a) * 0.35
+			spike.rotation.x = -sin(a) * 0.35
+			spike.material_override = hair_mat
+			hair_group.add_child(spike)
+	else:
+		# cacheado / black power
+		var count := 5 if style == 2 else 4
+		for i in count:
+			var curl := MeshInstance3D.new()
+			var cs := SphereMesh.new()
+			cs.radius = 0.14 if style == 2 else 0.17
+			cs.height = cs.radius * 2.0
+			cs.radial_segments = 10
+			cs.rings = 6
+			curl.mesh = cs
+			var a := TAU * float(i) / float(count) + 0.4
+			curl.position = Vector3(cos(a) * 0.16, 0.20, sin(a) * 0.14 - 0.02)
+			curl.material_override = hair_mat
+			hair_group.add_child(curl)
+		if style == 3:
+			# faixa de capitão
+			var band_mesh := MeshInstance3D.new()
+			var bm := CylinderMesh.new()
+			bm.top_radius = 0.315
+			bm.bottom_radius = 0.315
+			bm.height = 0.055
+			bm.radial_segments = 16
+			band_mesh.mesh = bm
+			band_mesh.position = Vector3(0.0, 0.10, 0.0)
+			band_mesh.material_override = _mat(Color("#f8fafc"), 0.5)
+			hair_group.add_child(band_mesh)
 
 
 # ------------------------------------------------------------------ medidas
@@ -338,28 +476,45 @@ func _rebuild() -> void:
 	# centro de massa baixo: fica de pé como um joão-bobo, mas ainda tomba
 	center_of_mass = Vector3(0.0, -h * 0.25, 0.0)
 	mass = BASE_MASS * size * size
+	gravity_scale = clampf(get_stat("gravity"), 0.05, 3.0)
 	body_shape.position = Vector3.ZERO
 
 	var half := h * 0.5
 	var hip_y := -half + leg_len
+	var team_light := color_body.lightened(0.3)
 
 	# torso
 	var tm := CapsuleMesh.new()
 	tm.radius = r * 0.99
 	tm.height = maxf(torso_h + r * 0.3, r * 2.0 + 0.02)
-	tm.radial_segments = 12
-	tm.rings = 4
+	tm.radial_segments = 14
+	tm.rings = 5
 	torso_mesh.mesh = tm
 	torso_mesh.position = Vector3(0.0, hip_y + torso_h * 0.5, 0.0)
 
 	# short
 	var sm := CylinderMesh.new()
 	sm.top_radius = r * 0.97
-	sm.bottom_radius = r * 0.8
-	sm.height = 0.26 * size
-	sm.radial_segments = 12
+	sm.bottom_radius = r * 0.82
+	sm.height = 0.28 * size
+	sm.radial_segments = 14
 	shorts_mesh.mesh = sm
-	shorts_mesh.position = Vector3(0.0, hip_y + 0.13 * size, 0.0)
+	shorts_mesh.position = Vector3(0.0, hip_y + 0.14 * size, 0.0)
+	var stripe := BoxMesh.new()
+	stripe.size = Vector3(r * 1.5, 0.2 * size, 0.03)
+	shorts_stripe.mesh = stripe
+	shorts_stripe.position = Vector3(0.0, hip_y + 0.14 * size, r * 0.92)
+	shorts_stripe.material_override = _mat(team_light, 0.7)
+
+	# gola
+	var cmesh := TorusMesh.new()
+	cmesh.inner_radius = r * 0.5
+	cmesh.outer_radius = r * 0.76
+	cmesh.rings = 18
+	cmesh.ring_segments = 6
+	collar.mesh = cmesh
+	collar.rotation.x = PI * 0.5
+	collar.position = Vector3(0.0, hip_y + torso_h - 0.02 * size, 0.0)
 
 	# cabeça
 	var head_r: float = 0.30 * head_s * size
@@ -368,12 +523,18 @@ func _rebuild() -> void:
 	head_sphere.radius = maxf(head_r * 0.9, 0.05)
 	head_shape.position = head_root.position
 
+	ear_l.position = Vector3(-0.29, 0.0, 0.01)
+	ear_r.position = Vector3(0.29, 0.0, 0.01)
+	brow_l.position = Vector3(-0.105, 0.135, 0.262)
+	brow_r.position = Vector3(0.105, 0.135, 0.262)
+	mouth.position = Vector3(0.0, -0.10, 0.278)
+
 	# pernas
-	var leg_radius: float = clampf(r * 0.32, 0.05, 0.6)
+	var leg_radius: float = clampf(r * 0.33, 0.05, 0.6)
 	var lm := CapsuleMesh.new()
 	lm.radius = leg_radius
 	lm.height = maxf(leg_len, leg_radius * 2.0 + 0.01)
-	lm.radial_segments = 8
+	lm.radial_segments = 10
 	lm.rings = 3
 	for mi in [leg_mesh_l, leg_mesh_r]:
 		mi.mesh = lm
@@ -381,31 +542,60 @@ func _rebuild() -> void:
 	leg_l.position = Vector3(-r * 0.5, hip_y, 0.0)
 	leg_r.position = Vector3(r * 0.5, hip_y, 0.0)
 
-	var foot_size := Vector3(leg_radius * 2.2, 0.1 * size, leg_radius * 3.4)
+	# meia + chuteira + solado
+	var sock_h: float = maxf(leg_len * 0.44, 0.1)
+	var sock_mesh := CylinderMesh.new()
+	sock_mesh.top_radius = leg_radius * 1.04
+	sock_mesh.bottom_radius = leg_radius * 1.0
+	sock_mesh.height = sock_h
+	sock_mesh.radial_segments = 10
+	for sock in [sock_l, sock_r]:
+		sock.mesh = sock_mesh
+		sock.position = Vector3(0.0, -leg_len + sock_h * 0.5, 0.0)
+		sock.material_override = _mat(color_body, 0.85)
+
+	var foot_size := Vector3(leg_radius * 2.5, 0.12 * size, leg_radius * 4.0)
 	var fm := BoxMesh.new()
 	fm.size = foot_size
+	var sole := BoxMesh.new()
+	sole.size = Vector3(foot_size.x * 1.04, 0.035 * size, foot_size.z * 1.02)
 	for foot in [foot_l, foot_r]:
 		foot.mesh = fm
-		foot.position = Vector3(0.0, -leg_len + foot_size.y * 0.5, leg_radius * 0.8)
+		foot.position = Vector3(0.0, -leg_len + foot_size.y * 0.5, leg_radius * 1.0)
+	for s in [sole_l, sole_r]:
+		s.mesh = sole
+		s.position = Vector3(0.0, -leg_len + 0.018 * size, leg_radius * 1.0)
 
 	# braços
 	var arm_len: float = 0.6 * size
-	var arm_radius: float = clampf(r * 0.2, 0.04, 0.4)
+	var arm_radius: float = clampf(r * 0.21, 0.04, 0.4)
 	var am := CapsuleMesh.new()
 	am.radius = arm_radius
 	am.height = maxf(arm_len, arm_radius * 2.0 + 0.01)
-	am.radial_segments = 8
+	am.radial_segments = 10
 	am.rings = 3
 	for mi in [arm_mesh_l, arm_mesh_r]:
 		mi.mesh = am
 		mi.position = Vector3(0.0, -arm_len * 0.5, 0.0)
 	arm_l.position = Vector3(-(r * 0.95 + 0.02), half - 0.22 * size, 0.0)
 	arm_r.position = Vector3(r * 0.95 + 0.02, half - 0.22 * size, 0.0)
-	for pivot in [arm_l, arm_r]:
-		var hand := pivot.get_node_or_null("Hand") as Node3D
-		if hand != null:
-			hand.position = Vector3(0.0, -arm_len, 0.0)
-			hand.scale = Vector3.ONE * size * 1.1
+
+	# manga
+	var sleeve_mesh := CylinderMesh.new()
+	sleeve_mesh.top_radius = arm_radius * 1.35
+	sleeve_mesh.bottom_radius = arm_radius * 1.5
+	sleeve_mesh.height = maxf(0.2 * size, 0.06)
+	sleeve_mesh.radial_segments = 10
+	for sl in [sleeve_l, sleeve_r]:
+		sl.mesh = sleeve_mesh
+		sl.position = Vector3(0.0, -0.12 * size, 0.0)
+		sl.material_override = _mat(color_body)
+
+	var glove_mat := _mat(Color("#facc15") if role == "gk" else Color("#f0bd93"))
+	for hand in [hand_l, hand_r]:
+		hand.position = Vector3(0.0, -arm_len, 0.0)
+		hand.scale = Vector3.ONE * size * (1.5 if role == "gk" else 1.15)
+		hand.material_override = glove_mat
 
 	if cap != null:
 		cap.visible = role == "gk"
@@ -424,6 +614,7 @@ func _physics_process(delta: float) -> void:
 	tackle_cd_left = maxf(0.0, tackle_cd_left - delta)
 	tackle_window = maxf(0.0, tackle_window - delta)
 	kick_anim = maxf(0.0, kick_anim - delta * 4.5)
+	_celebrate_t = maxf(0.0, _celebrate_t - delta)
 
 	var vy := linear_velocity.y
 	var was_grounded := grounded
@@ -437,6 +628,8 @@ func _physics_process(delta: float) -> void:
 			stun(0.3)
 		if game != null and game.has_method("spawn_dust"):
 			game.spawn_dust(global_position + Vector3(0.0, -_cur_h * 0.5 + 0.06, 0.0), Color("#dbe7cf"), clampf(-_prev_vy * 0.9, 5.0, 16.0), clampf(-_prev_vy * 0.06, 0.7, 1.4))
+		if _prev_vy < -10.0 and game != null and game.has_method("sfx_play"):
+			game.sfx_play("bounce", -14.0, 0.7)
 
 	_read_input(delta)
 
@@ -479,20 +672,20 @@ func _read_input(delta: float) -> void:
 	if not is_human:
 		return
 
-	if _key_down(keys.get("left", [])):
+	if _action_down("left"):
 		input_move -= 1.0
-	if _key_down(keys.get("right", [])):
+	if _action_down("right"):
 		input_move += 1.0
-	want_jump = _key_down(keys.get("jump", []))
-	want_kick = _key_down(keys.get("kick", []))
-	want_tackle = _key_down(keys.get("tackle", []))
+	want_jump = _action_down("jump")
+	want_kick = _action_down("kick")
+	want_tackle = _action_down("tackle")
 
 
-func _key_down(list: Array) -> bool:
-	for k in list:
-		if Input.is_physical_key_pressed(k):
-			return true
-	return false
+func _action_down(action: String) -> bool:
+	var full := "%s_%s" % [action_prefix, action]
+	if not InputMap.has_action(full):
+		return false
+	return Input.is_action_pressed(full)
 
 
 func _move(delta: float) -> void:
@@ -516,8 +709,15 @@ func _move(delta: float) -> void:
 		v.y = JUMP_SPEED * get_stat("jump")
 		linear_velocity = v
 		_jump_latch = true
+		_jump_hold = true
 		_squash = -0.2
 	elif not want_jump:
+		# solta o botão no meio do pulo = pulo mais baixo (peso e controle)
+		if _jump_hold and linear_velocity.y > 2.0:
+			var vv := linear_velocity
+			vv.y *= 0.55
+			linear_velocity = vv
+		_jump_hold = false
 		_jump_latch = false
 
 
@@ -566,6 +766,8 @@ func _tackle() -> void:
 
 	if game != null and game.has_method("spawn_dust"):
 		game.spawn_dust(global_position + Vector3(-facing * 0.45, -_cur_h * 0.5 + 0.08, 0.0), Color("#dbe7cf"), 7.0, 1.1)
+	if game != null and game.has_method("sfx_play"):
+		game.sfx_play("slide", -9.0, 0.95)
 
 	var v := linear_velocity
 	v.x = facing * TACKLE_SPEED * get_stat("speed")
@@ -601,6 +803,7 @@ func _check_hits() -> void:
 		var power: float = SHOVE_IMPULSE * get_stat("kick_power") * (2.0 if in_brawl else 1.0)
 		other_player.apply_central_impulse(dir * power)
 		other_player.stun(1.2 if in_brawl else 0.7)
+		other_player.knock_reaction()
 		tackle_window = 0.0
 		_squash = 0.18
 		if game.has_method("on_hit"):
@@ -660,6 +863,21 @@ func stun(seconds: float) -> void:
 	_flail_t = 0.0
 
 
+## Reação curta ao levar uma pancada: cambaleia antes de cair de vez.
+func knock_reaction() -> void:
+	_squash = 0.22
+	_idle_t = 0.0
+
+
+func celebrate(seconds := 1.6) -> void:
+	_celebrate_t = maxf(_celebrate_t, seconds)
+	_squash = -0.22
+
+
+func is_celebrating() -> bool:
+	return _celebrate_t > 0.0
+
+
 func is_gk() -> bool:
 	return role == "gk"
 
@@ -692,28 +910,45 @@ func _animate(delta: float) -> void:
 	if rig == null:
 		return
 
+	_idle_t += delta
 	var spd: float = clampf(absf(linear_velocity.x) / BASE_SPEED, 0.0, 1.8)
 	if grounded and spd > 0.05:
 		_run_phase += delta * (4.0 + 9.0 * spd)
 	var amp := (0.75 * spd) if grounded else 0.22
 	var s := sin(_run_phase)
 
+	var idle_blend: float = clampf(1.0 - spd * 3.0, 0.0, 1.0)
+	var breathe := sin(_idle_t * 2.1 + _idle_phase) * 0.5 + 0.5
+
 	if stun_left > 0.0:
 		s = sin(_run_phase * 4.0)
 		amp = 0.95
-		# braços pra cima no desespero
 		arm_l.rotation.z = 2.2 + s * 0.4
 		arm_r.rotation.z = -2.2 - s * 0.4
+		head_root.rotation.z = sin(_idle_t * 12.0) * 0.08
+	elif _celebrate_t > 0.0:
+		var pump := sin(_idle_t * 16.0)
+		arm_l.rotation.z = 2.7 + pump * 0.35
+		arm_r.rotation.z = -2.7 - pump * 0.35
+		leg_l.rotation.z = pump * 0.25
+		leg_r.rotation.z = -pump * 0.25
+		head_root.rotation.z = pump * 0.12
+		if _celebrate_t > 0.2 and fmod(_celebrate_t, 0.4) < delta:
+			_squash = -0.16
 	else:
-		arm_l.rotation.z = 0.3 - s * amp * 0.9
-		arm_r.rotation.z = -0.3 + s * amp * 0.9
+		arm_l.rotation.z = 0.3 - s * amp * 0.9 - idle_blend * (0.05 + breathe * 0.05)
+		arm_r.rotation.z = -0.3 + s * amp * 0.9 + idle_blend * (0.05 + breathe * 0.05)
+		# personalidade parado: olha para os lados e inclina a cabeça
+		head_root.rotation.z = idle_blend * sin(_idle_t * 0.7 + _idle_phase) * 0.06
+		head_root.rotation.x = idle_blend * sin(_idle_t * 0.9 + _idle_phase * 1.7) * 0.05
 
 	var kick := kick_anim * kick_anim
 	leg_l.rotation.z = s * amp
 	leg_r.rotation.z = -s * amp + facing * kick * 1.4
 
 	var sq := clampf(_squash, -0.35, 0.35)
-	rig.scale = Vector3(1.0 + sq, 1.0 - sq * 1.2, 1.0 + sq)
+	var breath_scale := idle_blend * breathe * 0.012
+	rig.scale = Vector3(1.0 + sq, 1.0 - sq * 1.2 + breath_scale, 1.0 + sq)
 	if absf(_squash) > 0.01:
 		_squash = move_toward(_squash, 0.0, delta * 2.6)
 

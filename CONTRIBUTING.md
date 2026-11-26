@@ -75,8 +75,14 @@ Escopos usados: `player`, `ball`, `bot`, `eventos`, `hud`, `menu`, `audio`, `fx`
 ## Qualidade mínima antes de abrir PR
 
 ```bash
-godot --headless --path . -- --smoke
+godot --headless --path . --import          # reimporta assets novos
+godot --headless --path . -- --smoke        # arcade: eventos, gol, modo 2P
+godot --headless --path . -- --smoke-campo  # campo todo: 5x5, goleiros, gol
+godot --headless --path . -- --smoke-ui     # telas, persistência, teclas, áudio
 ```
+
+O CI (`.github/workflows/ci.yml`) roda exatamente esses passos na Godot 4.6.3. Se algum
+teste falhar, corrija a causa — não relaxe a verificação.
 
 Se mexer em `tools/gen_audio.py`, regere e versione os sons:
 
@@ -84,3 +90,24 @@ Se mexer em `tools/gen_audio.py`, regere e versione os sons:
 python3 tools/gen_audio.py
 godot --headless --path . --import
 ```
+
+## Onde mexer
+
+| Quero mudar... | Arquivo |
+| --- | --- |
+| cores, tipografia, caixas | `scripts/ui/ui_theme.gd` |
+| menu, modos, opções, controles, pausa, resultado | `scripts/ui/menu.gd` |
+| placar, banner de evento, mensagens | `scripts/ui/hud.gd` |
+| uma opção nova | `scripts/settings.gd` (+ linha em `menu.gd`) |
+| regra de partida, estados, gols | `scripts/game.gd` |
+| física e ações do jogador | `scripts/player.gd` |
+| um evento | `scripts/events/` + `POOL` em `event_manager.gd` |
+| ajustar a UI sem jogar | `scenes/dev/ui_gallery.tscn` (F6) |
+| entrar direto no 5x5 | `scenes/dev/sandbox.tscn` (F6) |
+
+Antes de caçar no código, [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) tem a árvore de nós
+da cena principal, os autoloads, como rodar cenas isoladas, breakpoints úteis e receitas de
+debug (colisões, monitores, profiler).
+
+Não adicione opção que não funcione nem botão decorativo: a tela de opções é contrato com
+quem joga.

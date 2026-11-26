@@ -12,6 +12,9 @@ const POOL := [
 	preload("res://scripts/events/turbo_speed.gd"),
 	preload("res://scripts/events/brawl.gd"),
 	preload("res://scripts/events/giant_invasion.gd"),
+	preload("res://scripts/events/moon_gravity.gd"),
+	preload("res://scripts/events/tilted_field.gd"),
+	preload("res://scripts/events/miniatures.gd"),
 ]
 
 var game: Node
@@ -125,6 +128,8 @@ func _activate() -> void:
 		fired_ids[e.id] = true
 		if game.has_method("sfx_play"):
 			game.sfx_play("event", -4.0, 1.32)
+		if game.has_method("on_event_started"):
+			game.on_event_started(e)
 		print("[EVENTO] ativo: ", e.id)
 	pending.clear()
 	_update_banner()
@@ -136,15 +141,30 @@ func _deactivate(e: GameEvent) -> void:
 	if active.is_empty():
 		timer = randf_range(min_gap, max_gap)
 		game.hud.clear_banner()
+		game.hud.set_active_events([])
 	else:
 		_update_banner()
+
+
+## Fichas de evento ativo no HUD (nome, cor e tempo restante).
+func _active_entries() -> Array:
+	var out: Array = []
+	for e in active:
+		out.append({
+			"title": e.title,
+			"color": e.color,
+			"time_left": e.time_left,
+			"duration": e.duration,
+		})
+	return out
 
 
 func _update_banner() -> void:
 	if game == null or game.hud == null:
 		return
+	game.hud.set_active_events(_active_entries())
 	if not pending.is_empty():
-		game.hud.show_banner("⚠ " + _join(pending), "PREPARE-SE  %.1fs" % maxf(warn_left, 0.0), pending[0].color, 0.0)
+		game.hud.show_banner(_join(pending), "PREPARE-SE  %.1fs" % maxf(warn_left, 0.0), pending[0].color, 0.0)
 		return
 	if active.is_empty():
 		return
@@ -170,6 +190,7 @@ func reset() -> void:
 	timer = randf_range(min_gap, max_gap)
 	if game != null and game.hud != null:
 		game.hud.clear_banner()
+		game.hud.set_active_events([])
 
 
 func all_ids() -> Array:

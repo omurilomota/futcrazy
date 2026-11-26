@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  GODOT_VERSION: 4.6.3
+
+jobs:
+  headless:
+    name: Importação + testes headless
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar Godot
+        run: |
+          set -euo pipefail
+          curl -fsSL -o godot.zip \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip
+          sudo mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+          sudo chmod +x /usr/local/bin/godot
+          godot --version
+
+      - name: Importar assets
+        run: godot --headless --path . --import
+
+      - name: Smoke arcade (eventos, gol, 2P)
+        run: godot --headless --path . -- --smoke
+
+      - name: Smoke campo todo (5x5)
+        run: godot --headless --path . -- --smoke-campo
+
+      - name: Smoke de interface e persistência
+        run: godot --headless --path . -- --smoke-ui

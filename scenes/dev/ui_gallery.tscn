@@ -1,0 +1,37 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/dev/ui_gallery.gd" id="1_gallery"]
+[ext_resource type="Script" path="res://scripts/stadium.gd" id="2_stadium"]
+[ext_resource type="Script" path="res://scripts/ui/hud.gd" id="3_hud"]
+[ext_resource type="Script" path="res://scripts/ui/menu.gd" id="4_menu"]
+
+[sub_resource type="Environment" id="Environment_day"]
+background_mode = 1
+background_color = Color(0.47451, 0.776471, 0.94902, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.811765, 0.909804, 1, 1)
+ambient_light_energy = 0.5
+tonemap_mode = 2
+
+[node name="UiGallery" type="Node3D"]
+script = ExtResource("1_gallery")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_day")
+
+[node name="Camera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.9865983, 0.16316819, 0, -0.16316819, 0.9865983, 0, 7.6, 26)
+current = true
+projection = 1
+size = 11.5
+near = 0.05
+far = 120.0
+
+[node name="Stadium" type="Node3D" parent="."]
+script = ExtResource("2_stadium")
+
+[node name="Hud" type="CanvasLayer" parent="."]
+script = ExtResource("3_hud")
+
+[node name="Menu" type="CanvasLayer" parent="."]
+script = ExtResource("4_menu")

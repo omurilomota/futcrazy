@@ -1,3 +1,4 @@
+@tool
 class_name Ball
 extends RigidBody3D
 
@@ -101,6 +102,9 @@ func _build_visuals() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if Engine.is_editor_hint():
+		return
+
 	# campo de trampolim: a bola ganha energia a cada toque no chão
 	if game != null and game.trampoline and linear_velocity.y <= 0.1:
 		if global_position.y < MIN_RADIUS + 0.35:
@@ -158,15 +162,18 @@ func _refresh() -> void:
 	var bounce := 0.62
 	var friction := 0.75
 	var mass_mult := 1.0
+	var gravity := 1.0
 	var tint := Color("#f8fafc")
 	for id in modifiers:
 		var m: Dictionary = modifiers[id]
 		bounce = maxf(bounce, float(m.get("bounce", 0.0)))
 		friction = minf(friction, float(m.get("friction", 1.0)))
 		mass_mult *= float(m.get("mass", 1.0))
+		gravity *= float(m.get("gravity", 1.0))
 		if m.has("tint"):
 			tint = m["tint"]
 	mass = clampf(0.45 * mass_mult, 0.12, 2.0)
+	gravity_scale = clampf(gravity, 0.0, 3.0)
 	physics_material_override.bounce = bounce
 	physics_material_override.friction = friction
 	if _base_material != null:
